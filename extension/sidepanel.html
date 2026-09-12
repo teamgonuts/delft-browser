@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Delft Browser</title>
+<link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+<header>
+  <div class="brand">Delft Browser <span class="poc">PoC</span></div>
+  <div class="status" id="status">helper: checking…</div>
+  <div class="toolbar">
+    <button id="load" class="primary">Load article from this tab</button>
+    <label class="voice">Voice
+      <select id="voice">
+        <option value="nl-NL-FennaNeural">Fenna (NL, f)</option>
+        <option value="nl-NL-MaartenNeural">Maarten (NL, m)</option>
+        <option value="nl-NL-ColetteNeural">Colette (NL, f)</option>
+        <option value="nl-BE-DenaNeural">Dena (BE, f)</option>
+      </select>
+    </label>
+  </div>
+  <div class="hint">Per sentence: <b>1</b> listen · <b>2</b> record · <b>3</b> play yourself back. Three full rounds fills the ring. Hover a word for English.</div>
+</header>
+<main>
+  <div id="article-title" class="article-title"></div>
+  <div id="progress" class="progress"></div>
+  <ol id="sentences" class="sentences"></ol>
+  <div id="empty" class="empty">Open a Dutch article in the current tab, then press <b>Load article</b>.</div>
+</main>
+<div id="tooltip" class="tooltip" hidden></div>
+<script src="sidepanel.js"></script>
+</body>
+</html>

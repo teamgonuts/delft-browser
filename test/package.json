@@ -1,0 +1,7 @@
+{
+  "name": "delft-browser-e2e",
+  "private": true,
+  "type": "module",
+  "scripts": { "e2e": "node e2e.mjs" },
+  "devDependencies": { "puppeteer-core": "^24" }
+}
