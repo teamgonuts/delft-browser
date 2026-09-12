@@ -117,26 +117,26 @@ try {
   // ---- 4. listen (native TTS) ----
   const t0 = Date.now();
   const ttsResp = panel.waitForResponse((r) => r.url().includes("/tts?"), { timeout: 30000 });
-  await panel.click('.card[data-i="0"] .native');
+  await panel.click('.card[data-i="0"] .row[data-j="0"] .native');
   const tr = await ttsResp;
   report.steps.tts = { status: tr.status(), bytes: +(tr.headers()["content-length"] || 0), ms: Date.now() - t0 };
   log("tts:", report.steps.tts);
-  await panel.waitForFunction(() => window.__delft.sentences[0].flags.listened === true, { timeout: 40000 });
+  await panel.waitForFunction(() => window.__delft.sentences[0].items[0].flags.listened === true, { timeout: 40000 });
   report.steps.listenedMs = Date.now() - t0;
   log("native playback finished after", report.steps.listenedMs, "ms");
 
   // ---- 5. record (fake mic) ----
-  await panel.click('.card[data-i="0"] .rec');
-  await panel.waitForFunction(() => document.querySelector('.card[data-i="0"] .rec').classList.contains("on"), { timeout: 10000 });
+  await panel.click('.card[data-i="0"] .row[data-j="0"] .rec');
+  await panel.waitForFunction(() => document.querySelector('.card[data-i="0"] .row[data-j="0"] .rec').classList.contains("on"), { timeout: 10000 });
   await sleep(1800);
-  await panel.click('.card[data-i="0"] .rec');
-  await panel.waitForFunction(() => !!window.__delft.sentences[0].mine, { timeout: 10000 });
+  await panel.click('.card[data-i="0"] .row[data-j="0"] .rec');
+  await panel.waitForFunction(() => !!window.__delft.sentences[0].items[0].mine, { timeout: 10000 });
   report.steps.recorded = true;
   log("recorded a take; blob url present");
 
   // ---- 6. play back own recording -> completes round 1 ----
-  await panel.click('.card[data-i="0"] .mine');
-  await panel.waitForFunction(() => window.__delft.sentences[0].reps === 1, { timeout: 15000 });
+  await panel.click('.card[data-i="0"] .row[data-j="0"] .mine');
+  await panel.waitForFunction(() => window.__delft.sentences[0].items[0].reps === 1, { timeout: 15000 });
   report.steps.repsAfterOneRound = 1;
   log("round 1 complete (ring dot filled)");
 
@@ -153,6 +153,13 @@ try {
   }
   report.steps.hoverGlosses = hovered;
   report.steps.translation = await panel.$eval('.card[data-i="0"] .translation', (e) => e.textContent);
+  await panel.waitForFunction(() => window.__delft.sentences.every((s) => s.gloss), { timeout: 180000 });
+  report.steps.phrases = await panel.evaluate(() => window.__delft.sentences.map((s) => s.phrases || [s.text]));
+  const split = report.steps.phrases.filter((p) => p.length > 1).length;
+  log(`phrases: ${split} of ${report.steps.phrases.length} sentences split`);
+  report.steps.phrases.forEach((p, i) => { if (p.length > 1) log(`  ${i + 1}: ` + p.join("  |  ")); });
+  await panel.evaluate(() => document.querySelector('.card[data-i="2"]').scrollIntoView());
+  await panel.screenshot({ path: path.join(OUT, "panel-phrases.png") });
   log("hover glosses:", hovered);
   log("translation:", report.steps.translation);
   await words[1].hover();

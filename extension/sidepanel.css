@@ -45,3 +45,11 @@ main { padding: 10px 12px 40px; }
 .tooltip { position: fixed; background: #1d1d1b; color: #fff; padding: 6px 9px; border-radius: 6px; font-size: 13px; max-width: 260px; pointer-events: none; z-index: 10; box-shadow: 0 4px 14px rgba(0,0,0,.25); }
 .tooltip .src { color: #ffb36b; font-weight: 600; margin-right: 6px; }
 .tooltip.pending { opacity: .7; font-style: italic; }
+/* practice rows: one per phrase, plus the whole sentence */
+.rows { display: flex; flex-direction: column; gap: 6px; }
+.row { border-top: 1px dashed var(--line); padding-top: 6px; }
+.row:first-child { border-top: 0; padding-top: 0; }
+.rowtext { font-size: 14px; line-height: 1.4; margin-bottom: 4px; color: var(--fg); }
+.rowtext.whole { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.row.active .rowtext { color: var(--accent); }
+.row.done .rowtext { color: var(--green); }

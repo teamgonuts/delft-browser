@@ -7,7 +7,7 @@ const REPS_TARGET = 3;
 const $ = (id) => document.getElementById(id);
 const inExtension = typeof chrome !== "undefined" && !!(chrome.scripting && chrome.tabs);
 
-const state = { title: "", url: "", sentences: [], helperOk: false, stream: null, recorder: null, recordingIdx: -1 };
+const state = { title: "", url: "", sentences: [], helperOk: false, stream: null, recorder: null };
 
 // ---------- helper status ----------
 async function checkHelper() {
@@ -25,6 +25,8 @@ async function checkHelper() {
 }
 
 // ---------- article loading ----------
+function newItem(text) { return { text, native: {}, mine: null, flags: { listened: false, recorded: false, played: false }, reps: 0 }; }
+
 async function loadArticle() {
   $("load").disabled = true;
   try {
@@ -33,7 +35,9 @@ async function loadArticle() {
     else data = await loadStandalone();
     if (!data || !data.sentences || !data.sentences.length) throw new Error("No sentences found on this page.");
     state.title = data.title; state.url = data.url;
-    state.sentences = data.sentences.map((text) => ({ text, words: tokenize(text), gloss: null, translation: "", native: {}, mine: null, flags: { listened: false, recorded: false, played: false }, reps: 0 }));
+    // Each sentence starts as one practice item (the whole sentence). When the helper returns phrases, the
+    // card is rebuilt with one item per phrase plus a whole-sentence item.
+    state.sentences = data.sentences.map((text) => ({ text, words: tokenize(text), gloss: null, translation: "", phrases: null, items: [newItem(text)] }));
     render();
     fetchGlosses();
   } catch (e) {
@@ -46,7 +50,6 @@ async function extractFromTab() {
   const tabs = await chrome.tabs.query({});
   const candidates = tabs.filter((t) => /^https?:/.test(t.url || ""));
   if (!candidates.length) throw new Error("No web page tab found.");
-  // Prefer the active tab of the focused window, else the most recently used page.
   let tab = candidates.find((t) => t.active && t.lastFocusedWindow) || candidates.find((t) => t.active);
   if (!tab) tab = candidates.sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0))[0];
   const results = await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["vendor/Readability.js", "content/extract.js"] });
@@ -61,16 +64,14 @@ async function loadStandalone() {
   return r.json();
 }
 
-// ---------- words & glosses ----------
+// ---------- words, glosses, phrases ----------
 function tokenize(text) {
-  // Keep tokens as displayed; the lookup key strips punctuation and lowercases.
   return text.split(/(\s+)/).filter((t) => t.length).map((t) => ({ raw: t, key: normKey(t), isWord: /[\p{L}\p{N}]/u.test(t) }));
 }
 function normKey(t) { return t.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "").toLowerCase(); }
 
 async function fetchGlosses() {
   if (!state.helperOk) return;
-  // Small first chunk so the top of the article gets glosses quickly, then bigger chunks, two in flight.
   const chunks = []; let i = 0;
   while (i < state.sentences.length) { const n = chunks.length === 0 ? 3 : 8; chunks.push(Array.from({ length: Math.min(n, state.sentences.length - i) }, (_, k) => i + k)); i += n; }
   const worker = async () => { while (chunks.length) await glossChunk(chunks.shift()); };
@@ -82,18 +83,22 @@ async function glossChunk(idxs) {
     const r = await fetch(HELPER + "/gloss", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sentences: idxs.map((i) => state.sentences[i].text) }) });
     const j = await r.json();
     (j.results || []).forEach((res, k) => {
-      const s = state.sentences[idxs[k]];
+      const i = idxs[k]; const s = state.sentences[i];
       if (!s || !res) return;
       s.translation = res.translation || "";
       const map = new Map();
       for (const [w, g] of res.words || []) {
         const key = normKey(w); if (key && !map.has(key)) map.set(key, g);
-        // Multi-word tokens from the model ("Den Haag") also gloss each displayed word.
         if (/\s/.test(key)) for (const part of key.split(/\s+/)) if (part && !map.has(part)) map.set(part, g);
       }
       s.gloss = map;
-      const card = document.querySelector(`.card[data-i="${idxs[k]}"] .translation`);
-      if (card) card.textContent = s.translation;
+      const phrases = Array.isArray(res.phrases) && res.phrases.length ? res.phrases : [s.text];
+      const untouched = s.items.every((it) => !it.mine && it.reps === 0 && !it.flags.listened);
+      if (phrases.length > 1 && untouched) {
+        s.phrases = phrases;
+        s.items = [...phrases.map(newItem), newItem(s.text)];
+      }
+      renderCard(i);
     });
   } catch (e) { console.warn("gloss failed", e); }
   updateProgress();
@@ -106,10 +111,20 @@ function render() {
   const ol = $("sentences"); ol.innerHTML = "";
   state.sentences.forEach((s, i) => {
     const li = document.createElement("li"); li.className = "card"; li.dataset.i = i;
-    li.innerHTML = `
-      <div class="num">${i + 1} / ${state.sentences.length}</div>
-      <div class="text">${s.words.map((t) => t.isWord ? `<span class="w" data-key="${escapeHtml(t.key)}">${escapeHtml(t.raw)}</span>` : escapeHtml(t.raw)).join("")}</div>
-      <div class="translation">${escapeHtml(s.translation)}</div>
+    ol.appendChild(li);
+    renderCard(i);
+  });
+  updateProgress();
+}
+
+function renderCard(i) {
+  const s = state.sentences[i];
+  const li = document.querySelector(`.card[data-i="${i}"]`); if (!li) return;
+  const split = s.items.length > 1;
+  const rows = s.items.map((it, j) => {
+    const isWhole = split && j === s.items.length - 1;
+    const label = !split ? "" : isWhole ? `<div class="rowtext whole">hele zin</div>` : `<div class="rowtext">${escapeHtml(it.text)}</div>`;
+    return `<div class="row${isWhole ? " wholerow" : ""}" data-j="${j}">${label}
       <div class="controls">
         <button class="native" title="Play native speaker">▶ Native</button>
         <button class="rec" title="Record yourself">● Record</button>
@@ -118,79 +133,90 @@ function render() {
           <span class="dot"></span><span class="dot"></span><span class="dot"></span>
           <span class="steps"><span class="step" data-f="listened">1</span><span class="step" data-f="recorded">2</span><span class="step" data-f="played">3</span></span>
         </div>
-      </div>`;
-    li.querySelector(".native").addEventListener("click", () => playNative(i));
-    li.querySelector(".rec").addEventListener("click", () => toggleRecord(i));
-    li.querySelector(".mine").addEventListener("click", () => playMine(i));
-    ol.appendChild(li);
+      </div></div>`;
+  }).join("");
+  li.innerHTML = `
+    <div class="num">${i + 1} / ${state.sentences.length}${split ? ` · ${s.phrases.length} phrases` : ""}</div>
+    <div class="text">${s.words.map((t) => t.isWord ? `<span class="w" data-key="${escapeHtml(t.key)}">${escapeHtml(t.raw)}</span>` : escapeHtml(t.raw)).join("")}</div>
+    <div class="translation">${escapeHtml(s.translation)}</div>
+    <div class="rows">${rows}</div>`;
+  li.querySelectorAll(".row").forEach((row) => {
+    const j = +row.dataset.j;
+    row.querySelector(".native").addEventListener("click", () => playNative(i, j));
+    row.querySelector(".rec").addEventListener("click", () => toggleRecord(i, j));
+    row.querySelector(".mine").addEventListener("click", () => playMine(i, j));
   });
-  updateProgress();
+  s.items.forEach((_, j) => updateRow(i, j, false));
+  li.classList.toggle("done", sentenceDone(s));
 }
 
-function updateCard(i) {
-  const s = state.sentences[i];
-  const li = document.querySelector(`.card[data-i="${i}"]`); if (!li) return;
-  li.querySelectorAll(".dot").forEach((d, k) => d.classList.toggle("full", k < s.reps));
-  li.querySelectorAll(".step").forEach((el) => el.classList.toggle("done", !!s.flags[el.dataset.f]));
-  li.querySelector(".mine").disabled = !s.mine;
-  li.classList.toggle("done", s.reps >= REPS_TARGET);
-  document.querySelectorAll(".card.active").forEach((c) => c.classList.remove("active"));
-  li.classList.add("active");
+function sentenceDone(s) { return s.items.every((it) => it.reps >= REPS_TARGET); }
+
+function rowEl(i, j) { return document.querySelector(`.card[data-i="${i}"] .row[data-j="${j}"]`); }
+
+function updateRow(i, j, activate = true) {
+  const s = state.sentences[i]; const it = s.items[j];
+  const row = rowEl(i, j); if (!row) return;
+  row.querySelectorAll(".dot").forEach((d, k) => d.classList.toggle("full", k < it.reps));
+  row.querySelectorAll(".step").forEach((el) => el.classList.toggle("done", !!it.flags[el.dataset.f]));
+  row.querySelector(".mine").disabled = !it.mine;
+  row.classList.toggle("done", it.reps >= REPS_TARGET);
+  row.closest(".card").classList.toggle("done", sentenceDone(s));
+  if (activate) {
+    document.querySelectorAll(".card.active, .row.active").forEach((c) => c.classList.remove("active"));
+    row.classList.add("active"); row.closest(".card").classList.add("active");
+  }
   updateProgress();
 }
 
 function updateProgress() {
-  const done = state.sentences.filter((s) => s.reps >= REPS_TARGET).length;
+  const done = state.sentences.filter(sentenceDone).length;
   const glossed = state.sentences.filter((s) => s.gloss).length;
   $("progress").textContent = `${done} / ${state.sentences.length} sentences completed (${REPS_TARGET} rounds each) · glosses ready for ${glossed} / ${state.sentences.length}`;
 }
 
-function completeStep(i, flag) {
-  const s = state.sentences[i];
-  s.flags[flag] = true;
-  if (s.flags.listened && s.flags.recorded && s.flags.played) {
-    s.reps = Math.min(REPS_TARGET, s.reps + 1);
-    s.flags = { listened: false, recorded: false, played: false };
+function completeStep(i, j, flag) {
+  const it = state.sentences[i].items[j];
+  it.flags[flag] = true;
+  if (it.flags.listened && it.flags.recorded && it.flags.played) {
+    it.reps = Math.min(REPS_TARGET, it.reps + 1);
+    it.flags = { listened: false, recorded: false, played: false };
   }
-  updateCard(i);
+  updateRow(i, j);
 }
 
 // ---------- audio: native ----------
 let currentAudio = null;
 function stopCurrent() { if (currentAudio) { currentAudio.pause(); currentAudio = null; } document.querySelectorAll(".playing").forEach((b) => b.classList.remove("playing")); }
 
-async function playNative(i) {
-  const s = state.sentences[i]; const voice = $("voice").value;
-  const btn = document.querySelector(`.card[data-i="${i}"] .native`);
-  stopCurrent(); btn.classList.add("playing"); updateCard(i);
+async function playNative(i, j) {
+  const it = state.sentences[i].items[j]; const voice = $("voice").value;
+  const btn = rowEl(i, j).querySelector(".native");
+  stopCurrent(); btn.classList.add("playing"); updateRow(i, j);
   if (state.helperOk) {
     try {
-      if (!s.native[voice]) {
-        const r = await fetch(`${HELPER}/tts?voice=${encodeURIComponent(voice)}&text=${encodeURIComponent(s.text)}`);
+      if (!it.native[voice]) {
+        const r = await fetch(`${HELPER}/tts?voice=${encodeURIComponent(voice)}&text=${encodeURIComponent(it.text)}`);
         if (!r.ok) throw new Error("tts " + r.status);
-        s.native[voice] = URL.createObjectURL(await r.blob());
+        it.native[voice] = URL.createObjectURL(await r.blob());
       }
-      const a = new Audio(s.native[voice]); currentAudio = a;
-      a.onended = () => { btn.classList.remove("playing"); completeStep(i, "listened"); };
+      const a = new Audio(it.native[voice]); currentAudio = a;
+      a.onended = () => { btn.classList.remove("playing"); completeStep(i, j, "listened"); };
       await a.play();
       return;
     } catch (e) { console.warn("helper tts failed, using browser voice", e); }
   }
-  // Fallback: browser speech synthesis (quality depends on installed voices).
-  const u = new SpeechSynthesisUtterance(s.text); u.lang = "nl-NL";
+  const u = new SpeechSynthesisUtterance(it.text); u.lang = "nl-NL";
   const v = speechSynthesis.getVoices().find((v) => /^nl/i.test(v.lang) && /natural|online/i.test(v.name)) || speechSynthesis.getVoices().find((v) => /^nl/i.test(v.lang));
   if (v) u.voice = v;
-  u.onend = () => { btn.classList.remove("playing"); completeStep(i, "listened"); };
+  u.onend = () => { btn.classList.remove("playing"); completeStep(i, j, "listened"); };
   speechSynthesis.cancel(); speechSynthesis.speak(u);
 }
 
 // ---------- audio: record & play back ----------
-async function toggleRecord(i) {
-  const btn = document.querySelector(`.card[data-i="${i}"] .rec`);
-  if (state.recorder && state.recorder.state === "recording") {
-    state.recorder.stop();
-    return;
-  }
+async function toggleRecord(i, j) {
+  const btn = rowEl(i, j).querySelector(".rec");
+  if (state.recorder && state.recorder.state === "recording") { state.recorder.stop(); return; }
   try {
     if (!state.stream) state.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
   } catch (e) {
@@ -206,27 +232,27 @@ async function toggleRecord(i) {
   stopCurrent();
   const chunks = [];
   const rec = new MediaRecorder(state.stream);
-  state.recorder = rec; state.recordingIdx = i;
+  state.recorder = rec;
   rec.ondataavailable = (ev) => { if (ev.data.size) chunks.push(ev.data); };
   rec.onstop = () => {
-    const s = state.sentences[i];
-    if (s.mine) URL.revokeObjectURL(s.mine);
-    s.mine = URL.createObjectURL(new Blob(chunks, { type: rec.mimeType || "audio/webm" }));
+    const it = state.sentences[i].items[j];
+    if (it.mine) URL.revokeObjectURL(it.mine);
+    it.mine = URL.createObjectURL(new Blob(chunks, { type: rec.mimeType || "audio/webm" }));
     btn.classList.remove("on"); btn.textContent = "● Record";
-    state.recorder = null; state.recordingIdx = -1;
-    completeStep(i, "recorded");
+    state.recorder = null;
+    completeStep(i, j, "recorded");
   };
   rec.start();
   btn.classList.add("on"); btn.textContent = "■ Stop";
-  updateCard(i);
+  updateRow(i, j);
 }
 
-async function playMine(i) {
-  const s = state.sentences[i]; if (!s.mine) return;
-  const btn = document.querySelector(`.card[data-i="${i}"] .mine`);
-  stopCurrent(); btn.classList.add("playing"); updateCard(i);
-  const a = new Audio(s.mine); currentAudio = a;
-  a.onended = () => { btn.classList.remove("playing"); completeStep(i, "played"); };
+async function playMine(i, j) {
+  const it = state.sentences[i].items[j]; if (!it.mine) return;
+  const btn = rowEl(i, j).querySelector(".mine");
+  stopCurrent(); btn.classList.add("playing"); updateRow(i, j);
+  const a = new Audio(it.mine); currentAudio = a;
+  a.onended = () => { btn.classList.remove("playing"); completeStep(i, j, "played"); };
   await a.play();
 }
 
@@ -257,5 +283,4 @@ function escapeHtml(s) { return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&a
 $("load").addEventListener("click", loadArticle);
 if (typeof speechSynthesis !== "undefined") speechSynthesis.getVoices();
 checkHelper().then(() => { if (!inExtension && new URLSearchParams(location.search).get("article")) loadArticle(); });
-// expose for tests
 window.__delft = state;

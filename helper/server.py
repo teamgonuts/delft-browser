@@ -107,9 +107,19 @@ For each numbered Dutch sentence below, produce:
     as written (without surrounding punctuation). The gloss is 1-5 English words giving the meaning IN THIS CONTEXT.
     For inflected forms also give the base, e.g. ["gelegd", "laid (leggen = to lay)"]. For a separable verb note the
     full verb, e.g. ["beslag", "seizure (beslag leggen op = to seize)"]. Names and numbers get a short note like "name".
+  - "phrases": the sentence cut into speakable pieces for a learner to repeat aloud, as a list of strings that
+    concatenate (with single spaces) back to the exact original sentence. Rules:
+      * A sentence of about 13 words or fewer stays whole: one phrase.
+      * Longer sentences split first at commas (the comma stays at the end of the piece), then at clause
+        boundaries before "dat", "die", "zodra", "omdat", "terwijl" and similar. Only if a piece would still be
+        longer than about 14 words, split it before a prepositional phrase.
+      * Aim for pieces of 6 to 12 words. Never split a verb cluster from its object ("beslag heeft gelegd" stays
+        together). Never make a piece shorter than 3 words unless it is a comma-delimited tail like
+        "schrijft het ziekenhuis."
+      * Headings and quotes follow the same rules.
 
 Output ONLY a JSON array, no prose, no markdown fences:
-[{"i": 0, "translation": "...", "words": [["Onderzoek", "investigation"], ...]}, ...]
+[{"i": 0, "translation": "...", "words": [["Onderzoek", "investigation"], ...], "phrases": ["...", "..."]}, ...]
 
 Sentences:
 """
@@ -178,7 +188,10 @@ def claude_gloss(sentences):
         try:
             i = int(item.get("i"))
             if 0 <= i < len(sentences):
-                out[i] = {"translation": item.get("translation", ""), "words": item.get("words", [])}
+                phrases = [str(x).strip() for x in item.get("phrases", []) if str(x).strip()]
+                if " ".join(phrases).replace("  ", " ") != sentences[i].strip():
+                    phrases = [sentences[i]]  # model drifted from the original text: keep the sentence whole
+                out[i] = {"translation": item.get("translation", ""), "words": item.get("words", []), "phrases": phrases}
         except Exception:  # noqa: BLE001
             continue
     return out
@@ -189,9 +202,12 @@ def gloss_sentences(sentences):
     todo = []
     for i, s in enumerate(sentences):
         p = os.path.join(GLOSS_CACHE, f"{sha(s)}.json")
+        cached = None
         if os.path.exists(p):
             with open(p, encoding="utf-8") as f:
-                results[i] = json.load(f)
+                cached = json.load(f)
+        if cached and cached.get("phrases"):
+            results[i] = cached
         else:
             todo.append(i)
     if todo:
