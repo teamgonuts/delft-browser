@@ -193,7 +193,16 @@ async function toggleRecord(i) {
   }
   try {
     if (!state.stream) state.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  } catch (e) { alert("Microphone access is needed to record: " + e.message); return; }
+  } catch (e) {
+    // Chrome cannot show the mic prompt inside a side panel ("Permission dismissed"), so ask once from a
+    // regular extension tab; the grant applies to the whole extension origin.
+    if (inExtension && chrome.tabs && chrome.runtime) {
+      chrome.tabs.create({ url: chrome.runtime.getURL("permission.html") });
+      $("status").textContent = "allow the microphone in the tab that just opened, then press Record again";
+      $("status").className = "status bad";
+    } else alert("Microphone access is needed to record: " + e.message);
+    return;
+  }
   stopCurrent();
   const chunks = [];
   const rec = new MediaRecorder(state.stream);
