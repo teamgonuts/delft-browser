@@ -36,7 +36,7 @@ const browser = await puppeteer.launch({
   executablePath: CHROME,
   headless: process.env.HEADFUL ? false : "new",
   userDataDir,
-  enableExtensions: [EXT],
+  enableExtensions: true,
   pipe: true,
   args: [
     "--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream",
@@ -87,8 +87,7 @@ try {
   await page.screenshot({ path: path.join(OUT, "article.png") });
 
   // ---- 2. the extension's side panel, opened as a tab ----
-  const sw = await browser.waitForTarget((t) => t.type() === "service_worker" && t.url().startsWith("chrome-extension://"), { timeout: 20000 });
-  const extId = new URL(sw.url()).host;
+  const extId = await browser.installExtension(EXT);
   report.extensionId = extId;
   log("extension id", extId);
   const panel = await browser.newPage();
