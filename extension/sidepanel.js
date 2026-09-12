@@ -15,12 +15,14 @@ async function checkHelper() {
     const r = await fetch(HELPER + "/health", { cache: "no-store" });
     const j = await r.json();
     state.helperOk = !!j.ok;
-    $("status").textContent = `helper: online · voice: edge neural · glosses: ${j.claude ? "claude cli" : "unavailable"}`;
+    $("status").textContent = "";
     $("status").className = "status ok";
+    $("status").hidden = true;
   } catch (e) {
     state.helperOk = false;
     $("status").textContent = "helper offline (run: python helper/server.py) · falling back to browser voice, no glosses";
     $("status").className = "status bad";
+    $("status").hidden = false;
   }
 }
 
@@ -96,83 +98,61 @@ async function glossChunk(idxs) {
       const untouched = s.items.every((it) => !it.mine && it.reps === 0 && !it.flags.listened);
       if (phrases.length > 1 && untouched) {
         s.phrases = phrases;
-        s.items = [...phrases.map(newItem), newItem(s.text)];
+        s.items = phrases.map(newItem);
       }
       renderCard(i);
     });
   } catch (e) { console.warn("gloss failed", e); }
-  updateProgress();
 }
 
 // ---------- rendering ----------
+// One box per practice item (a phrase, or a whole short sentence). Boxes are grouped per sentence in a <li>
+// so a sentence can be re-rendered when its phrases arrive.
 function render() {
   $("empty").hidden = true;
   $("article-title").textContent = state.title;
   const ol = $("sentences"); ol.innerHTML = "";
   state.sentences.forEach((s, i) => {
-    const li = document.createElement("li"); li.className = "card"; li.dataset.i = i;
+    const li = document.createElement("li"); li.className = "sentence"; li.dataset.i = i;
     ol.appendChild(li);
     renderCard(i);
   });
-  updateProgress();
 }
 
 function renderCard(i) {
   const s = state.sentences[i];
-  const li = document.querySelector(`.card[data-i="${i}"]`); if (!li) return;
-  const split = s.items.length > 1;
-  const rows = s.items.map((it, j) => {
-    const isWhole = split && j === s.items.length - 1;
-    const label = !split ? "" : isWhole ? `<div class="rowtext whole">hele zin</div>` : `<div class="rowtext">${escapeHtml(it.text)}</div>`;
-    return `<div class="row${isWhole ? " wholerow" : ""}" data-j="${j}">${label}
+  const li = document.querySelector(`.sentence[data-i="${i}"]`); if (!li) return;
+  li.innerHTML = s.items.map((it, j) => `
+    <div class="card" data-i="${i}" data-j="${j}">
+      <div class="text">${tokenize(it.text).map((t) => t.isWord ? `<span class="w" data-key="${escapeHtml(t.key)}">${escapeHtml(t.raw)}</span>` : escapeHtml(t.raw)).join("")}</div>
       <div class="controls">
         <button class="native" title="Play native speaker">▶ Native</button>
         <button class="rec" title="Record yourself">● Record</button>
         <button class="mine" title="Play your recording" disabled>▶ Me</button>
-        <div class="ring" title="Completed rounds">
-          <span class="dot"></span><span class="dot"></span><span class="dot"></span>
-          <span class="steps"><span class="step" data-f="listened">1</span><span class="step" data-f="recorded">2</span><span class="step" data-f="played">3</span></span>
-        </div>
-      </div></div>`;
-  }).join("");
-  li.innerHTML = `
-    <div class="num">${i + 1} / ${state.sentences.length}${split ? ` · ${s.phrases.length} phrases` : ""}</div>
-    <div class="text">${s.words.map((t) => t.isWord ? `<span class="w" data-key="${escapeHtml(t.key)}">${escapeHtml(t.raw)}</span>` : escapeHtml(t.raw)).join("")}</div>
-    <div class="translation">${escapeHtml(s.translation)}</div>
-    <div class="rows">${rows}</div>`;
-  li.querySelectorAll(".row").forEach((row) => {
-    const j = +row.dataset.j;
-    row.querySelector(".native").addEventListener("click", () => playNative(i, j));
-    row.querySelector(".rec").addEventListener("click", () => toggleRecord(i, j));
-    row.querySelector(".mine").addEventListener("click", () => playMine(i, j));
+        <div class="ring" title="Completed rounds"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+      </div>
+    </div>`).join("");
+  li.querySelectorAll(".card").forEach((card) => {
+    const j = +card.dataset.j;
+    card.querySelector(".native").addEventListener("click", () => playNative(i, j));
+    card.querySelector(".rec").addEventListener("click", () => toggleRecord(i, j));
+    card.querySelector(".mine").addEventListener("click", () => playMine(i, j));
   });
   s.items.forEach((_, j) => updateRow(i, j, false));
-  li.classList.toggle("done", sentenceDone(s));
 }
 
-function sentenceDone(s) { return s.items.every((it) => it.reps >= REPS_TARGET); }
-
-function rowEl(i, j) { return document.querySelector(`.card[data-i="${i}"] .row[data-j="${j}"]`); }
+function rowEl(i, j) { return document.querySelector(`.card[data-i="${i}"][data-j="${j}"]`); }
 
 function updateRow(i, j, activate = true) {
-  const s = state.sentences[i]; const it = s.items[j];
-  const row = rowEl(i, j); if (!row) return;
-  row.querySelectorAll(".dot").forEach((d, k) => d.classList.toggle("full", k < it.reps));
-  row.querySelectorAll(".step").forEach((el) => el.classList.toggle("done", !!it.flags[el.dataset.f]));
-  row.querySelector(".mine").disabled = !it.mine;
-  row.classList.toggle("done", it.reps >= REPS_TARGET);
-  row.closest(".card").classList.toggle("done", sentenceDone(s));
+  const it = state.sentences[i].items[j];
+  const card = rowEl(i, j); if (!card) return;
+  card.querySelectorAll(".dot").forEach((d, k) => d.classList.toggle("full", k < it.reps));
+  card.querySelector(".mine").disabled = !it.mine;
+  card.classList.toggle("done", it.reps >= REPS_TARGET);
   if (activate) {
-    document.querySelectorAll(".card.active, .row.active").forEach((c) => c.classList.remove("active"));
-    row.classList.add("active"); row.closest(".card").classList.add("active");
+    document.querySelectorAll(".card.active").forEach((c) => c.classList.remove("active"));
+    card.classList.add("active");
   }
-  updateProgress();
-}
-
-function updateProgress() {
-  const done = state.sentences.filter(sentenceDone).length;
-  const glossed = state.sentences.filter((s) => s.gloss).length;
-  $("progress").textContent = `${done} / ${state.sentences.length} sentences completed (${REPS_TARGET} rounds each) · glosses ready for ${glossed} / ${state.sentences.length}`;
 }
 
 function completeStep(i, j, flag) {

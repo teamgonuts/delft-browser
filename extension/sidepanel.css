@@ -23,11 +23,12 @@ main { padding: 10px 12px 40px; }
 .article-title { font-weight: 700; font-size: 15px; margin: 4px 0 6px; line-height: 1.3; }
 .progress { color: var(--muted); font-size: 12px; margin-bottom: 8px; }
 .sentences { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
+.sentence { display: flex; flex-direction: column; gap: 8px; }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px 10px 8px; }
 .card.done { border-color: var(--green); background: var(--green-soft); }
 .card.active { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
 .num { color: var(--muted); font-size: 11px; }
-.text { font-size: 15px; line-height: 1.5; margin: 2px 0 8px; }
+.text { font-size: 15px; line-height: 1.5; margin: 0 0 8px; }
 .w { border-bottom: 1px dotted #b8b6ad; cursor: help; border-radius: 2px; }
 .w:hover { background: var(--accent-soft); }
 .translation { color: var(--muted); font-size: 12px; font-style: italic; margin: -4px 0 8px; }
