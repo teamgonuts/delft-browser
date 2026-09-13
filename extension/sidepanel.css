@@ -21,7 +21,6 @@ button:hover { border-color: var(--accent); }
 button:disabled { opacity: .4; cursor: default; }
 button.primary { background: var(--accent); color: white; border-color: var(--accent); font-weight: 600; }
 main { padding: 10px 12px 40px; }
-.article-title { font-weight: 700; font-size: 15px; margin: 4px 0 6px; line-height: 1.3; }
 .progress { color: var(--muted); font-size: 12px; margin-bottom: 8px; }
 .sentences { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
 .sentence { display: flex; flex-direction: column; gap: 8px; }

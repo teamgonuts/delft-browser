@@ -94,7 +94,7 @@ try {
   await panel.waitForFunction(() => document.querySelectorAll(".card").length > 0 || (!document.getElementById("empty").hidden && /Could not/.test(document.getElementById("empty").textContent)), { timeout: 30000 });
   const sentences = await panel.evaluate(() => window.__delft.sentences.map((s) => s.text));
   if (!sentences.length) throw new Error("extraction failed: " + (await panel.$eval("#empty", (e) => e.textContent)));
-  report.steps.title = await panel.$eval("#article-title", (e) => e.textContent);
+  report.steps.title = await panel.evaluate(() => window.__delft.title);
   report.steps.sentenceCount = sentences.length;
   report.steps.firstSentences = sentences.slice(0, 5);
   log(`extracted ${sentences.length} sentences from "${report.steps.title}"`);
@@ -166,7 +166,7 @@ try {
   await page.goto(NEXT, { waitUntil: "domcontentloaded", timeout: 60000 }).catch(() => {});
   // The panel tab is now in the background: poll on an interval, rAF-based polling never fires there.
   await panel.waitForFunction(() => window.__delft.url.startsWith("https://nos.nl/artikel/2630855") && window.__delft.sentences.length >= 32, { timeout: 45000, polling: 500 });
-  report.steps.followedTitle = await panel.$eval("#article-title", (e) => e.textContent);
+  report.steps.followedTitle = await panel.evaluate(() => window.__delft.title);
   log("panel followed navigation to:", report.steps.followedTitle);
 
   report.ok = true;

@@ -40,7 +40,7 @@ async function loadArticle(reason = "") {
       prefetchGlosses();
     } catch (e) {
       state.url = ""; state.sentences = [];
-      $("article-title").textContent = ""; $("sentences").innerHTML = "";
+      $("sentences").innerHTML = "";
       $("empty").hidden = false;
       $("empty").textContent = /No article|No web page/.test(e.message) ? "Open a Dutch article in this tab and it will appear here." : "Could not load: " + (e.message || String(e));
     } finally { loading = null; if (loadAgain) { loadAgain = false; loadArticle("again"); } }
@@ -85,7 +85,6 @@ async function prefetchGlosses() {
 // ---------- rendering ----------
 function render() {
   $("empty").hidden = true;
-  $("article-title").textContent = state.title;
   const ol = $("sentences"); ol.innerHTML = "";
   state.sentences.forEach((s, i) => {
     const li = document.createElement("li"); li.className = "sentence"; li.dataset.i = i;
