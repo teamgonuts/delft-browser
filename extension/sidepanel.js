@@ -31,7 +31,10 @@ async function loadArticle(reason = "") {
       }
       stopCurrent();
       state.title = data.title; state.url = data.url; state.tabId = tab.id;
-    state.sentences = data.sentences.map((text) => ({ text, phrases: Splitter.split(text), items: Splitter.split(text).map(newItem) }));
+      // The headline is the first practice item: split like any sentence, unless the body already starts with it.
+      const title = (data.title || "").replace(/\s+/g, " ").trim();
+      const texts = title && data.sentences[0] !== title ? [title, ...data.sentences] : data.sentences;
+      state.sentences = texts.map((text) => ({ text, phrases: Splitter.split(text), items: Splitter.split(text).map(newItem) }));
       render();
       preloadAudio();
       prefetchGlosses();

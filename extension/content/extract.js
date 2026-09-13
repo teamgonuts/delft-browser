@@ -33,5 +33,6 @@
       sentences.push(s);
     }
   }
+  title = (title || "").replace(/\s+[|\-–—]\s+[^|\-–—]{2,40}$/, "").trim(); // strip a trailing " | Site name"
   return { title, url: location.href, sentences };
 })();

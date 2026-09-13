@@ -165,7 +165,7 @@ try {
   await page.bringToFront();
   await page.goto(NEXT, { waitUntil: "domcontentloaded", timeout: 60000 }).catch(() => {});
   // The panel tab is now in the background: poll on an interval, rAF-based polling never fires there.
-  await panel.waitForFunction(() => window.__delft.url.startsWith("https://nos.nl/artikel/2630855") && window.__delft.sentences.length >= 31, { timeout: 45000, polling: 500 });
+  await panel.waitForFunction(() => window.__delft.url.startsWith("https://nos.nl/artikel/2630855") && window.__delft.sentences.length >= 32, { timeout: 45000, polling: 500 });
   report.steps.followedTitle = await panel.$eval("#article-title", (e) => e.textContent);
   log("panel followed navigation to:", report.steps.followedTitle);
 
