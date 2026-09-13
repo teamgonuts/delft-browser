@@ -22,7 +22,7 @@ Chrome 138 or newer. The first hover downloads Chrome's Dutch-English translatio
 
 - Open a Dutch article, click the Delft Browser icon, press **Load article from this tab**.
 - The first time you press **Record**, a tab opens asking for microphone access. Allow it once.
-- Pick a voice (Fenna, Maarten, Colette, Dena) at the top.
+- Pick a voice at the top (Maarten by default; also Fenna, Colette, Dena). Clips for the whole article preload in the background, so playback is instant once the top of the list has loaded.
 
 ## How it works
 

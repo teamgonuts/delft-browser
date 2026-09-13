@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Delft Browser",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Delft-method language practice on any web page: listen to a native speaker, record yourself, compare, sentence by sentence.",
   "permissions": [
     "sidePanel",

@@ -23,6 +23,7 @@ async function loadArticle() {
     state.title = data.title; state.url = data.url;
     state.sentences = data.sentences.map((text) => ({ text, phrases: Splitter.split(text), items: Splitter.split(text).map(newItem) }));
     render();
+    preloadAudio();
     prefetchGlosses();
   } catch (e) {
     $("empty").hidden = false;
@@ -111,19 +112,49 @@ function stopCurrent() {
   document.querySelectorAll(".playing").forEach((b) => b.classList.remove("playing"));
 }
 
+// Clip for one item: memory -> IndexedDB -> Edge TTS. One in-flight promise per item+voice, so a click on an
+// item that the preloader is already fetching just waits for that same request.
+const inflight = new Map();
+function getNative(it, voice) {
+  if (it.native[voice]) return Promise.resolve(it.native[voice]);
+  const k = voice + "|" + it.text;
+  if (inflight.has(k)) return inflight.get(k);
+  const p = (async () => {
+    let blob = await AudioCache.get(voice, it.text);
+    if (!blob) { blob = await EdgeTTS.synthesize(it.text, voice); AudioCache.put(voice, it.text, blob); }
+    it.native[voice] = URL.createObjectURL(blob);
+    return it.native[voice];
+  })();
+  inflight.set(k, p);
+  p.finally(() => inflight.delete(k));
+  return p;
+}
+
+// Preload every phrase in reading order as soon as the article is loaded, two connections at a time.
+let preloadGen = 0;
+async function preloadAudio() {
+  const gen = ++preloadGen; const voice = $("voice").value;
+  const queue = state.sentences.flatMap((s) => s.items);
+  const worker = async () => {
+    while (queue.length && gen === preloadGen) {
+      const it = queue.shift();
+      try { await getNative(it, voice); } catch (e) { console.warn("preload failed", e); }
+    }
+  };
+  await Promise.all([worker(), worker()]);
+}
+$("voice").addEventListener("change", () => { if (state.sentences.length) preloadAudio(); });
+
 async function playNative(i, j) {
   const it = state.sentences[i].items[j]; const voice = $("voice").value;
   const btn = rowEl(i, j).querySelector(".native");
   stopCurrent(); btn.classList.add("playing"); updateRow(i, j);
   const finish = () => { btn.classList.remove("playing"); completeStep(i, j, "listened"); };
   try {
-    if (!it.native[voice]) {
-      btn.classList.add("loading");
-      const blob = await EdgeTTS.synthesize(it.text, voice);
-      btn.classList.remove("loading");
-      it.native[voice] = URL.createObjectURL(blob);
-    }
-    const a = new Audio(it.native[voice]); currentAudio = a;
+    if (!it.native[voice]) btn.classList.add("loading");
+    const url = await getNative(it, voice);
+    btn.classList.remove("loading");
+    const a = new Audio(url); currentAudio = a;
     a.onended = finish;
     await a.play();
     state.voiceMode = "edge";

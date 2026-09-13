@@ -107,13 +107,24 @@ try {
   await panel.screenshot({ path: path.join(OUT, "panel-loaded.png") });
 
   // ---- 4. listen (Edge neural voice, straight from the extension) ----
+  // Preload should already have the first clips; measure click -> playback start.
+  await panel.waitForFunction(() => !!window.__delft.sentences[0].items[0].native[document.getElementById("voice").value], { timeout: 30000 }).catch(() => {});
+  report.steps.preloadedAtClick = await panel.evaluate(() => window.__delft.sentences.flatMap((s) => s.items).filter((it) => Object.keys(it.native).length).length);
   const t0 = Date.now();
   await panel.click('.card[data-i="0"][data-j="0"] .native');
+  await panel.waitForFunction(() => document.querySelector('.card[data-i="0"][data-j="0"] .native').classList.contains("playing") && !document.querySelector('.card[data-i="0"][data-j="0"] .native').classList.contains("loading"), { timeout: 30000 });
+  report.steps.clickToPlayMs = Date.now() - t0;
+  log(`click -> playing in ${report.steps.clickToPlayMs} ms (${report.steps.preloadedAtClick} clips preloaded at click time)`);
   await panel.waitForFunction(() => window.__delft.sentences[0].items[0].flags.listened === true, { timeout: 40000 });
   report.steps.listenedMs = Date.now() - t0;
   report.steps.voiceMode = await panel.evaluate(() => window.__delft.voiceMode);
   log(`native playback finished after ${report.steps.listenedMs} ms via ${report.steps.voiceMode}`);
   if (report.steps.voiceMode !== "edge") throw new Error("Edge voice did not work; fell back to " + report.steps.voiceMode);
+
+  const tp = Date.now();
+  await panel.waitForFunction(() => window.__delft.sentences.flatMap((s) => s.items).every((it) => Object.keys(it.native).length), { timeout: 120000 }).catch(() => {});
+  report.steps.allPreloadedMs = Date.now() - tp + report.steps.listenedMs;
+  log(`all ${report.steps.cards} clips preloaded ~${report.steps.allPreloadedMs} ms after load`);
 
   // ---- 5. record (fake mic) ----
   await panel.click('.card[data-i="0"][data-j="0"] .rec');

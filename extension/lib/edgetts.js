@@ -67,7 +67,7 @@ const EdgeTTS = (() => {
   }
 
   // One retry with a fresh token, in case the 5-minute window rolled over mid-request or the clock is skewed.
-  async function synthesize(text, voice = "nl-NL-FennaNeural", opts = {}) {
+  async function synthesize(text, voice = "nl-NL-MaartenNeural", opts = {}) {
     try { return await synthesizeOnce(text, voice, opts); }
     catch (e) { clockSkewSeconds -= 300; try { return await synthesizeOnce(text, voice, opts); } finally { clockSkewSeconds += 300; } }
   }
