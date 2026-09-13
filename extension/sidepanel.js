@@ -1,47 +1,29 @@
-// Delft Browser side panel. Works in two modes:
-//  - extension mode: extracts the article from the current tab via chrome.scripting
-//  - standalone mode: served by the helper at http://127.0.0.1:8765/sidepanel.html?article=<id>
-const HELPER = "http://127.0.0.1:8765";
+// Delft Browser side panel. Everything runs inside the extension: no helper, no keys.
+//   article  -> content script (Readability) via chrome.scripting
+//   phrases  -> lib/splitter.js (rules)
+//   voice    -> lib/edgetts.js (Microsoft Edge neural voices), fallback chrome.tts
+//   glosses  -> lib/dictionary.js then Chrome's on-device Translator API (lib/glosses.js)
 const REPS_TARGET = 3;
-
 const $ = (id) => document.getElementById(id);
 const inExtension = typeof chrome !== "undefined" && !!(chrome.scripting && chrome.tabs);
 
-const state = { title: "", url: "", sentences: [], helperOk: false, stream: null, recorder: null };
+const state = { title: "", url: "", sentences: [], stream: null, recorder: null, voiceMode: "edge" };
 
-// ---------- helper status ----------
-async function checkHelper() {
-  try {
-    const r = await fetch(HELPER + "/health", { cache: "no-store" });
-    const j = await r.json();
-    state.helperOk = !!j.ok;
-    $("status").textContent = "";
-    $("status").className = "status ok";
-    $("status").hidden = true;
-  } catch (e) {
-    state.helperOk = false;
-    $("status").textContent = "helper offline (run: python helper/server.py) · falling back to browser voice, no glosses";
-    $("status").className = "status bad";
-    $("status").hidden = false;
-  }
-}
+function setStatus(text, bad = false) { const el = $("status"); el.textContent = text; el.className = "status " + (bad ? "bad" : "ok"); el.hidden = !text; }
 
 // ---------- article loading ----------
 function newItem(text) { return { text, native: {}, mine: null, flags: { listened: false, recorded: false, played: false }, reps: 0 }; }
 
 async function loadArticle() {
   $("load").disabled = true;
+  setStatus("");
   try {
-    let data;
-    if (inExtension) data = await extractFromTab();
-    else data = await loadStandalone();
+    const data = await extractFromTab();
     if (!data || !data.sentences || !data.sentences.length) throw new Error("No sentences found on this page.");
     state.title = data.title; state.url = data.url;
-    // Each sentence starts as one practice item (the whole sentence). When the helper returns phrases, the
-    // card is rebuilt with one item per phrase plus a whole-sentence item.
-    state.sentences = data.sentences.map((text) => ({ text, words: tokenize(text), gloss: null, translation: "", phrases: null, items: [newItem(text)] }));
+    state.sentences = data.sentences.map((text) => ({ text, phrases: Splitter.split(text), items: Splitter.split(text).map(newItem) }));
     render();
-    fetchGlosses();
+    prefetchGlosses();
   } catch (e) {
     $("empty").hidden = false;
     $("empty").innerHTML = "Could not load: " + escapeHtml(e.message || String(e));
@@ -49,6 +31,7 @@ async function loadArticle() {
 }
 
 async function extractFromTab() {
+  if (!inExtension) throw new Error("Open this panel from the extension toolbar button.");
   const tabs = await chrome.tabs.query({});
   const candidates = tabs.filter((t) => /^https?:/.test(t.url || ""));
   if (!candidates.length) throw new Error("No web page tab found.");
@@ -58,87 +41,42 @@ async function extractFromTab() {
   return results && results[0] && results[0].result;
 }
 
-async function loadStandalone() {
-  const id = new URLSearchParams(location.search).get("article");
-  if (!id) throw new Error("Standalone mode needs ?article=<id> (see helper/server.py).");
-  const r = await fetch(`${HELPER}/articles/${encodeURIComponent(id)}`);
-  if (!r.ok) throw new Error("Article not found in helper.");
-  return r.json();
-}
+// ---------- glosses ----------
+const tokenize = (text) => text.split(/(\s+)/).filter((t) => t.length).map((t) => ({ raw: t, key: Glosses.normKey(t), isWord: /[\p{L}\p{N}]/u.test(t) }));
 
-// ---------- words, glosses, phrases ----------
-function tokenize(text) {
-  return text.split(/(\s+)/).filter((t) => t.length).map((t) => ({ raw: t, key: normKey(t), isWord: /[\p{L}\p{N}]/u.test(t) }));
-}
-function normKey(t) { return t.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "").toLowerCase(); }
-
-async function fetchGlosses() {
-  if (!state.helperOk) return;
-  const chunks = []; let i = 0;
-  while (i < state.sentences.length) { const n = chunks.length === 0 ? 3 : 8; chunks.push(Array.from({ length: Math.min(n, state.sentences.length - i) }, (_, k) => i + k)); i += n; }
-  const worker = async () => { while (chunks.length) await glossChunk(chunks.shift()); };
-  await Promise.all([worker(), worker()]);
-}
-
-async function glossChunk(idxs) {
-  try {
-    const r = await fetch(HELPER + "/gloss", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sentences: idxs.map((i) => state.sentences[i].text) }) });
-    const j = await r.json();
-    (j.results || []).forEach((res, k) => {
-      const i = idxs[k]; const s = state.sentences[i];
-      if (!s || !res) return;
-      s.translation = res.translation || "";
-      const map = new Map();
-      for (const [w, g] of res.words || []) {
-        const key = normKey(w); if (key && !map.has(key)) map.set(key, g);
-        if (/\s/.test(key)) for (const part of key.split(/\s+/)) if (part && !map.has(part)) map.set(part, g);
-      }
-      s.gloss = map;
-      const phrases = Array.isArray(res.phrases) && res.phrases.length ? res.phrases : [s.text];
-      const untouched = s.items.every((it) => !it.mine && it.reps === 0 && !it.flags.listened);
-      if (phrases.length > 1 && untouched) {
-        s.phrases = phrases;
-        s.items = phrases.map(newItem);
-      }
-      renderCard(i);
-    });
-  } catch (e) { console.warn("gloss failed", e); }
+async function prefetchGlosses() {
+  // Warm the Translator (triggers the one-time model download) and the cache, a few words at a time.
+  await Glosses.translator();
+  for (const s of state.sentences) {
+    for (const it of s.items) for (const t of tokenize(it.text)) if (t.isWord) { try { await Glosses.wordGloss(t.raw, s.text); } catch (e) { /* ignore */ } }
+  }
 }
 
 // ---------- rendering ----------
-// One box per practice item (a phrase, or a whole short sentence). Boxes are grouped per sentence in a <li>
-// so a sentence can be re-rendered when its phrases arrive.
 function render() {
   $("empty").hidden = true;
   $("article-title").textContent = state.title;
   const ol = $("sentences"); ol.innerHTML = "";
   state.sentences.forEach((s, i) => {
     const li = document.createElement("li"); li.className = "sentence"; li.dataset.i = i;
+    li.innerHTML = s.items.map((it, j) => `
+      <div class="card" data-i="${i}" data-j="${j}">
+        <div class="text">${tokenize(it.text).map((t) => t.isWord ? `<span class="w" data-key="${escapeHtml(t.key)}">${escapeHtml(t.raw)}</span>` : escapeHtml(t.raw)).join("")}</div>
+        <div class="controls">
+          <button class="native" title="Play native speaker">▶ Native</button>
+          <button class="rec" title="Record yourself">● Record</button>
+          <button class="mine" title="Play your recording" disabled>▶ Me</button>
+          <div class="ring" title="Completed rounds"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+        </div>
+      </div>`).join("");
+    li.querySelectorAll(".card").forEach((card) => {
+      const j = +card.dataset.j;
+      card.querySelector(".native").addEventListener("click", () => playNative(i, j));
+      card.querySelector(".rec").addEventListener("click", () => toggleRecord(i, j));
+      card.querySelector(".mine").addEventListener("click", () => playMine(i, j));
+    });
     ol.appendChild(li);
-    renderCard(i);
   });
-}
-
-function renderCard(i) {
-  const s = state.sentences[i];
-  const li = document.querySelector(`.sentence[data-i="${i}"]`); if (!li) return;
-  li.innerHTML = s.items.map((it, j) => `
-    <div class="card" data-i="${i}" data-j="${j}">
-      <div class="text">${tokenize(it.text).map((t) => t.isWord ? `<span class="w" data-key="${escapeHtml(t.key)}">${escapeHtml(t.raw)}</span>` : escapeHtml(t.raw)).join("")}</div>
-      <div class="controls">
-        <button class="native" title="Play native speaker">▶ Native</button>
-        <button class="rec" title="Record yourself">● Record</button>
-        <button class="mine" title="Play your recording" disabled>▶ Me</button>
-        <div class="ring" title="Completed rounds"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
-      </div>
-    </div>`).join("");
-  li.querySelectorAll(".card").forEach((card) => {
-    const j = +card.dataset.j;
-    card.querySelector(".native").addEventListener("click", () => playNative(i, j));
-    card.querySelector(".rec").addEventListener("click", () => toggleRecord(i, j));
-    card.querySelector(".mine").addEventListener("click", () => playMine(i, j));
-  });
-  s.items.forEach((_, j) => updateRow(i, j, false));
 }
 
 function rowEl(i, j) { return document.querySelector(`.card[data-i="${i}"][data-j="${j}"]`); }
@@ -167,30 +105,42 @@ function completeStep(i, j, flag) {
 
 // ---------- audio: native ----------
 let currentAudio = null;
-function stopCurrent() { if (currentAudio) { currentAudio.pause(); currentAudio = null; } document.querySelectorAll(".playing").forEach((b) => b.classList.remove("playing")); }
+function stopCurrent() {
+  if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+  if (inExtension && chrome.tts) chrome.tts.stop();
+  document.querySelectorAll(".playing").forEach((b) => b.classList.remove("playing"));
+}
 
 async function playNative(i, j) {
   const it = state.sentences[i].items[j]; const voice = $("voice").value;
   const btn = rowEl(i, j).querySelector(".native");
   stopCurrent(); btn.classList.add("playing"); updateRow(i, j);
-  if (state.helperOk) {
-    try {
-      if (!it.native[voice]) {
-        const r = await fetch(`${HELPER}/tts?voice=${encodeURIComponent(voice)}&text=${encodeURIComponent(it.text)}`);
-        if (!r.ok) throw new Error("tts " + r.status);
-        it.native[voice] = URL.createObjectURL(await r.blob());
-      }
-      const a = new Audio(it.native[voice]); currentAudio = a;
-      a.onended = () => { btn.classList.remove("playing"); completeStep(i, j, "listened"); };
-      await a.play();
-      return;
-    } catch (e) { console.warn("helper tts failed, using browser voice", e); }
+  const finish = () => { btn.classList.remove("playing"); completeStep(i, j, "listened"); };
+  try {
+    if (!it.native[voice]) {
+      btn.classList.add("loading");
+      const blob = await EdgeTTS.synthesize(it.text, voice);
+      btn.classList.remove("loading");
+      it.native[voice] = URL.createObjectURL(blob);
+    }
+    const a = new Audio(it.native[voice]); currentAudio = a;
+    a.onended = finish;
+    await a.play();
+    state.voiceMode = "edge";
+    return;
+  } catch (e) {
+    console.warn("Edge voice failed, using Chrome's built-in voice", e);
+    btn.classList.remove("loading");
   }
-  const u = new SpeechSynthesisUtterance(it.text); u.lang = "nl-NL";
-  const v = speechSynthesis.getVoices().find((v) => /^nl/i.test(v.lang) && /natural|online/i.test(v.name)) || speechSynthesis.getVoices().find((v) => /^nl/i.test(v.lang));
-  if (v) u.voice = v;
-  u.onend = () => { btn.classList.remove("playing"); completeStep(i, j, "listened"); };
-  speechSynthesis.cancel(); speechSynthesis.speak(u);
+  // Fallback: Chrome's OS voice. Quality depends on the Dutch voice installed on the machine.
+  state.voiceMode = "chrome";
+  setStatus("online voice unavailable, using this computer's Dutch voice", true);
+  if (inExtension && chrome.tts) {
+    chrome.tts.speak(it.text, { lang: "nl-NL", onEvent: (ev) => { if (ev.type === "end") finish(); if (ev.type === "error") btn.classList.remove("playing"); } });
+  } else {
+    const u = new SpeechSynthesisUtterance(it.text); u.lang = "nl-NL"; u.onend = finish;
+    speechSynthesis.cancel(); speechSynthesis.speak(u);
+  }
 }
 
 // ---------- audio: record & play back ----------
@@ -204,8 +154,7 @@ async function toggleRecord(i, j) {
     // regular extension tab; the grant applies to the whole extension origin.
     if (inExtension && chrome.tabs && chrome.runtime) {
       chrome.tabs.create({ url: chrome.runtime.getURL("permission.html") });
-      $("status").textContent = "allow the microphone in the tab that just opened, then press Record again";
-      $("status").className = "status bad";
+      setStatus("allow the microphone in the tab that just opened, then press Record again", true);
     } else alert("Microphone access is needed to record: " + e.message);
     return;
   }
@@ -238,17 +187,23 @@ async function playMine(i, j) {
 
 // ---------- tooltip ----------
 const tip = $("tooltip");
-document.addEventListener("mouseover", (ev) => {
+let tipSeq = 0;
+document.addEventListener("mouseover", async (ev) => {
   const w = ev.target.closest && ev.target.closest(".w"); if (!w) return;
   const card = w.closest(".card"); const s = state.sentences[+card.dataset.i];
-  const g = s.gloss ? s.gloss.get(w.dataset.key) : null;
-  tip.innerHTML = `<span class="src">${escapeHtml(w.textContent)}</span>${escapeHtml(g || (s.gloss ? "(no gloss)" : state.helperOk ? "translating…" : "helper offline"))}`;
-  tip.classList.toggle("pending", !g);
-  tip.hidden = false;
-  positionTip(ev);
+  const seq = ++tipSeq;
+  const show = (g, pending) => {
+    tip.innerHTML = `<span class="src">${escapeHtml(w.textContent)}</span>${escapeHtml(g)}`;
+    tip.classList.toggle("pending", pending); tip.hidden = false; positionTip(ev);
+  };
+  show("…", true);
+  let g = null;
+  try { g = await Glosses.wordGloss(w.textContent, s.text); } catch (e) { /* ignore */ }
+  if (seq !== tipSeq) return;
+  show(g || (Glosses.status === "unavailable" ? "(translation not available in this Chrome)" : Glosses.status === "downloading" ? "downloading translator…" : "(no gloss)"), !g);
 });
 document.addEventListener("mousemove", (ev) => { if (!tip.hidden) positionTip(ev); });
-document.addEventListener("mouseout", (ev) => { if (ev.target.closest && ev.target.closest(".w")) tip.hidden = true; });
+document.addEventListener("mouseout", (ev) => { if (ev.target.closest && ev.target.closest(".w")) { tip.hidden = true; tipSeq++; } });
 function positionTip(ev) {
   const pad = 12; let x = ev.clientX + pad, y = ev.clientY + pad;
   const r = tip.getBoundingClientRect();
@@ -261,6 +216,5 @@ function escapeHtml(s) { return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&a
 
 // ---------- boot ----------
 $("load").addEventListener("click", loadArticle);
-if (typeof speechSynthesis !== "undefined") speechSynthesis.getVoices();
-checkHelper().then(() => { if (!inExtension && new URLSearchParams(location.search).get("article")) loadArticle(); });
+setStatus("");
 window.__delft = state;

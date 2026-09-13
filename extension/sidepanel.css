@@ -54,3 +54,4 @@ main { padding: 10px 12px 40px; }
 .rowtext.whole { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
 .row.active .rowtext { color: var(--accent); }
 .row.done .rowtext { color: var(--green); }
+.controls .native.loading { opacity: .6; }

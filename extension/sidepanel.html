@@ -8,8 +8,8 @@
 </head>
 <body>
 <header>
-  <div class="brand">Delft Browser <span class="poc">PoC</span></div>
-  <div class="status" id="status">helper: checking…</div>
+  <div class="brand">Delft Browser</div>
+  <div class="status" id="status" hidden></div>
   <div class="toolbar">
     <button id="load" class="primary">Load article from this tab</button>
     <label class="voice">Voice
@@ -28,6 +28,10 @@
   <div id="empty" class="empty">Open a Dutch article in the current tab, then press <b>Load article</b>.</div>
 </main>
 <div id="tooltip" class="tooltip" hidden></div>
+<script src="lib/splitter.js"></script>
+<script src="lib/dictionary.js"></script>
+<script src="lib/glosses.js"></script>
+<script src="lib/edgetts.js"></script>
 <script src="sidepanel.js"></script>
 </body>
 </html>

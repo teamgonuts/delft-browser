@@ -1,9 +1,10 @@
 // End-to-end proof: load the real extension into Chrome, open a Dutch article, and drive the side panel
-// through the full Delft loop on the first sentence (listen -> record -> play back -> hover gloss).
+// through the full Delft loop on the first phrase (listen -> record -> play back -> hover gloss).
+// No helper process, no keys: this is exactly what a fresh install does.
 //
 //   node test/e2e.mjs [articleUrl]
 //
-// Requires: the helper running (python helper/server.py), Chrome installed, `npm i puppeteer-core` in test/.
+// Requires: Chrome installed, `npm install` in test/.
 import puppeteer from "puppeteer-core";
 import fs from "node:fs";
 import path from "node:path";
@@ -14,7 +15,6 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const EXT = path.resolve(__dirname, "..", "extension");
 const OUT = path.resolve(__dirname, "out");
 fs.mkdirSync(OUT, { recursive: true });
-const HELPER = "http://127.0.0.1:8765";
 const URL_ = process.argv[2] || "https://www.parool.nl/amsterdam/onderzoek-naar-corruptie-beslag-gelegd-op-twee-panden-van-cardiologen-olvg~ba3d9c94/";
 const CHROME = [
   "C:/Program Files/Google/Chrome/Application/chrome.exe",
@@ -26,10 +26,6 @@ if (!CHROME) throw new Error("Chrome not found; set CHROME_PATH");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 const report = { url: URL_, steps: {} };
-
-const health = await fetch(HELPER + "/health").then((r) => r.json()).catch(() => null);
-if (!health || !health.ok) throw new Error("helper is not running: python helper/server.py");
-report.helper = health;
 
 const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "delft-e2e-"));
 const browser = await puppeteer.launch({
@@ -54,7 +50,6 @@ try {
   // DPG Media privacy gate (parool.nl, volkskrant.nl, ad.nl, ...). This runs in a throw-away profile that is
   // deleted at the end of the test. We try the "Instellen" -> decline route first and only fall back to "Akkoord".
   const clickButton = async (res) => page.evaluate((srcs) => {
-    // The DPG gate renders its buttons inside shadow DOM, so walk shadow roots too.
     const btns = [];
     const walk = (root) => { for (const el of root.querySelectorAll("*")) { if (el.shadowRoot) walk(el.shadowRoot); if (el.matches("button, a[role=button], input[type=submit]")) btns.push(el); } };
     walk(document);
@@ -77,8 +72,7 @@ try {
     await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
     await sleep(2000);
   }
-  // A second consent layer sometimes sits inside the article page itself.
-  for (let i = 0; i < 2 && !/parool\.nl\/amsterdam/.test(page.url()); i++) {
+  for (let i = 0; i < 2 && /consent|privacy/i.test(page.url()); i++) {
     await sleep(2000);
     await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {});
   }
@@ -94,36 +88,32 @@ try {
   await panel.setViewport({ width: 420, height: 900 });
   panel.on("console", (m) => { if (m.type() === "error" || m.type() === "warning") log("panel console:", m.text()); });
   await panel.goto(`chrome-extension://${extId}/sidepanel.html`, { waitUntil: "load" });
-  await sleep(800);
-  report.steps.helperStatus = await panel.$eval("#status", (e) => e.textContent);
-  log("panel status:", report.steps.helperStatus);
+  await sleep(500);
 
-  // ---- 3. extract article ----
+  // ---- 3. extract article, split into phrases (synchronous, rule-based) ----
   await panel.click("#load");
-  await panel.waitForFunction(() => document.querySelectorAll(".card").length > 0 || !document.getElementById("empty").hidden && /Could not/.test(document.getElementById("empty").textContent), { timeout: 30000 });
+  await panel.waitForFunction(() => document.querySelectorAll(".card").length > 0 || (!document.getElementById("empty").hidden && /Could not/.test(document.getElementById("empty").textContent)), { timeout: 30000 });
   const sentences = await panel.evaluate(() => window.__delft.sentences.map((s) => s.text));
   if (!sentences.length) throw new Error("extraction failed: " + (await panel.$eval("#empty", (e) => e.textContent)));
   report.steps.title = await panel.$eval("#article-title", (e) => e.textContent);
   report.steps.sentenceCount = sentences.length;
   report.steps.firstSentences = sentences.slice(0, 5);
   log(`extracted ${sentences.length} sentences from "${report.steps.title}"`);
-  sentences.slice(0, 5).forEach((s, i) => log(`  ${i + 1}. ${s}`));
   fs.writeFileSync(path.join(OUT, "article.json"), JSON.stringify({ title: report.steps.title, url: page.url(), sentences }, null, 2));
-  const stored = await fetch(HELPER + "/articles", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: report.steps.title, url: page.url(), sentences }) }).then((r) => r.json());
-  report.standaloneUrl = stored.url;
-  log("standalone url:", stored.url);
+  report.steps.phrases = await panel.evaluate(() => window.__delft.sentences.map((s) => s.phrases));
+  const split = report.steps.phrases.filter((p) => p.length > 1).length;
+  report.steps.cards = await panel.evaluate(() => document.querySelectorAll(".card").length);
+  log(`phrases: ${split} of ${sentences.length} sentences split, ${report.steps.cards} practice boxes`);
   await panel.screenshot({ path: path.join(OUT, "panel-loaded.png") });
 
-  // ---- 4. listen (native TTS) ----
+  // ---- 4. listen (Edge neural voice, straight from the extension) ----
   const t0 = Date.now();
-  const ttsResp = panel.waitForResponse((r) => r.url().includes("/tts?"), { timeout: 30000 });
   await panel.click('.card[data-i="0"][data-j="0"] .native');
-  const tr = await ttsResp;
-  report.steps.tts = { status: tr.status(), bytes: +(tr.headers()["content-length"] || 0), ms: Date.now() - t0 };
-  log("tts:", report.steps.tts);
   await panel.waitForFunction(() => window.__delft.sentences[0].items[0].flags.listened === true, { timeout: 40000 });
   report.steps.listenedMs = Date.now() - t0;
-  log("native playback finished after", report.steps.listenedMs, "ms");
+  report.steps.voiceMode = await panel.evaluate(() => window.__delft.voiceMode);
+  log(`native playback finished after ${report.steps.listenedMs} ms via ${report.steps.voiceMode}`);
+  if (report.steps.voiceMode !== "edge") throw new Error("Edge voice did not work; fell back to " + report.steps.voiceMode);
 
   // ---- 5. record (fake mic) ----
   await panel.click('.card[data-i="0"][data-j="0"] .rec');
@@ -140,31 +130,24 @@ try {
   report.steps.repsAfterOneRound = 1;
   log("round 1 complete (ring dot filled)");
 
-  // ---- 7. word hover gloss ----
+  // ---- 7. word hover gloss (dictionary + on-device Translator) ----
   const glossStart = Date.now();
-  await panel.waitForFunction(() => !!window.__delft.sentences[0].gloss, { timeout: 180000 });
-  report.steps.glossWaitMs = Date.now() - glossStart;
-  const words = await panel.$$('.card[data-i="0"] .w');
+  const words = await panel.$$('.card[data-i="0"][data-j="0"] .w');
   const hovered = [];
-  for (const w of words.slice(0, 4)) {
+  for (const w of words.slice(0, 6)) {
     await w.hover();
-    await sleep(150);
-    hovered.push(await panel.$eval("#tooltip", (e) => Array.from(e.childNodes, (n) => n.textContent).join(" → ")));
+    await panel.waitForFunction(() => { const t = document.getElementById("tooltip"); return !t.hidden && !t.classList.contains("pending"); }, { timeout: 60000 }).catch(() => {});
+    hovered.push(await panel.$eval("#tooltip", (e) => e.textContent));
   }
+  report.steps.glossWaitMs = Date.now() - glossStart;
   report.steps.hoverGlosses = hovered;
-  report.steps.translation = await panel.evaluate(() => window.__delft.sentences[0].translation);
-  await panel.waitForFunction(() => window.__delft.sentences.every((s) => s.gloss), { timeout: 180000 });
-  report.steps.phrases = await panel.evaluate(() => window.__delft.sentences.map((s) => s.phrases || [s.text]));
-  const split = report.steps.phrases.filter((p) => p.length > 1).length;
-  log(`phrases: ${split} of ${report.steps.phrases.length} sentences split`);
-  report.steps.phrases.forEach((p, i) => { if (p.length > 1) log(`  ${i + 1}: ` + p.join("  |  ")); });
+  report.steps.translatorStatus = await panel.evaluate(() => Glosses.status);
+  log("hover glosses:", hovered, "| translator:", report.steps.translatorStatus);
+  await words[3].hover();
+  await sleep(300);
+  await panel.screenshot({ path: path.join(OUT, "panel-hover.png") });
   await panel.evaluate(() => document.querySelector('.card[data-i="2"][data-j="0"]').scrollIntoView());
   await panel.screenshot({ path: path.join(OUT, "panel-phrases.png") });
-  log("hover glosses:", hovered);
-  log("translation:", report.steps.translation);
-  await words[1].hover();
-  await sleep(200);
-  await panel.screenshot({ path: path.join(OUT, "panel-hover.png") });
   await panel.screenshot({ path: path.join(OUT, "panel-full.png"), fullPage: true });
 
   report.ok = true;
@@ -177,5 +160,5 @@ try {
   await browser.close().catch(() => {});
   fs.rmSync(userDataDir, { recursive: true, force: true });
 }
-console.log(JSON.stringify(report, null, 2));
+console.log(JSON.stringify({ ok: report.ok, ...report.steps, error: report.error }, null, 2));
 process.exit(report.ok ? 0 : 1);

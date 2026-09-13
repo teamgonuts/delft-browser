@@ -1,12 +1,39 @@
 {
   "manifest_version": 3,
-  "name": "Delft Browser (PoC)",
-  "version": "0.1.0",
+  "name": "Delft Browser",
+  "version": "0.2.0",
   "description": "Delft-method language practice on any web page: listen to a native speaker, record yourself, compare, sentence by sentence.",
-  "permissions": ["sidePanel", "scripting", "tabs", "storage"],
-  "host_permissions": ["<all_urls>", "http://127.0.0.1/*", "http://localhost/*"],
-  "background": { "service_worker": "background.js" },
-  "action": { "default_title": "Open Delft Browser" },
-  "side_panel": { "default_path": "sidepanel.html" },
-  "icons": { "128": "icon128.png" }
+  "permissions": [
+    "sidePanel",
+    "scripting",
+    "tabs",
+    "storage",
+    "declarativeNetRequest",
+    "tts"
+  ],
+  "host_permissions": [
+    "<all_urls>",
+    "*://speech.platform.bing.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Open Delft Browser"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "icons": {
+    "128": "icon128.png"
+  },
+  "declarative_net_request": {
+    "rule_resources": [
+      {
+        "id": "edge_tts_ua",
+        "enabled": true,
+        "path": "rules.json"
+      }
+    ]
+  }
 }
