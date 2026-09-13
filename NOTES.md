@@ -13,6 +13,7 @@ Open it in Obsidian (vault `wiki-brain`) or read the files directly. Paths below
 - [Product idea and the Delft method](../wiki-brain/wiki/projects/delft-browser/product-idea.md)
 - [Milestone 1 plan — proof of concept](../wiki-brain/wiki/projects/delft-browser/m1-plan.md)
 - [Milestone 1 results — what worked, what didn't](../wiki-brain/wiki/projects/delft-browser/m1-results.md)
+- [Milestone 2 plan — install and it just works](../wiki-brain/wiki/projects/delft-browser/m2-plan.md)
 
 ## In this repo
 
