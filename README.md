@@ -38,7 +38,7 @@ No account. No API keys. No server. Everything runs inside Chrome.
 **3. Use it**
 
 - Open a Dutch article (nos.nl, nu.nl, parool.nl, volkskrant.nl…)
-- Click the Delft Browser icon, then **Load article from this tab**
+- Click the Delft Browser icon. The panel loads the article by itself and follows you as you switch tabs or open the next article. The ↻ button reloads the current page.
 - The first time you press **Record**, a tab opens asking for microphone access. Allow it once.
 
 Needs Chrome 138 or newer. On the first hover Chrome downloads its Dutch→English translation model once (a few seconds); after that hovers are instant and offline.

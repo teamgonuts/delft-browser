@@ -6,12 +6,13 @@
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--fg); font-size: 14px; }
-header { position: sticky; top: 0; background: var(--bg); border-bottom: 1px solid var(--line); padding: 10px 12px 8px; z-index: 2; }
+header { position: sticky; top: 0; background: var(--bg); border-bottom: 1px solid var(--line); padding: 8px 12px; z-index: 2; }
 .brand { font-weight: 700; font-size: 16px; }
 .poc { font-size: 10px; background: var(--accent-soft); color: var(--accent); padding: 1px 6px; border-radius: 8px; vertical-align: middle; margin-left: 4px; }
-.status { color: var(--muted); font-size: 11px; margin-top: 2px; }
+.status { color: var(--muted); font-size: 11px; margin-top: 6px; }
 .status.ok { color: var(--green); } .status.bad { color: var(--red); }
-.toolbar { display: flex; gap: 8px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
+.toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+#reload { margin-left: auto; padding: 4px 8px; font-size: 14px; }
 .voice { font-size: 12px; color: var(--muted); display: flex; gap: 4px; align-items: center; }
 select { font: inherit; font-size: 12px; }
 .hint { color: var(--muted); font-size: 12px; margin-top: 6px; line-height: 1.4; }
@@ -43,7 +44,7 @@ main { padding: 10px 12px 40px; }
 .step { font-size: 10px; color: #c9c7be; }
 .step.done { color: var(--green); font-weight: 700; }
 .empty { color: var(--muted); padding: 24px 6px; text-align: center; line-height: 1.5; }
-.tooltip { position: fixed; background: #1d1d1b; color: #fff; padding: 6px 9px; border-radius: 6px; font-size: 13px; max-width: 260px; pointer-events: none; z-index: 10; box-shadow: 0 4px 14px rgba(0,0,0,.25); }
+.tooltip { position: fixed; background: #1d1d1b; color: #fff; padding: 6px 9px; border-radius: 6px; font-size: 13px; max-width: calc(100vw - 24px); pointer-events: none; z-index: 10; box-shadow: 0 4px 14px rgba(0,0,0,.25); line-height: 1.35; }
 .tooltip .src { color: #ffb36b; font-weight: 600; margin-right: 6px; }
 .tooltip.pending { opacity: .7; font-style: italic; }
 /* practice rows: one per phrase, plus the whole sentence */

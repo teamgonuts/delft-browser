@@ -8,10 +8,7 @@
 </head>
 <body>
 <header>
-  <div class="brand">Delft Browser</div>
-  <div class="status" id="status" hidden></div>
   <div class="toolbar">
-    <button id="load" class="primary">Load article from this tab</button>
     <label class="voice">Voice
       <select id="voice">
         <option value="nl-NL-MaartenNeural" selected>Maarten (NL, m)</option>
@@ -20,12 +17,14 @@
         <option value="nl-BE-DenaNeural">Dena (BE, f)</option>
       </select>
     </label>
+    <button id="reload" title="Reload the article from the current tab">↻</button>
   </div>
+  <div class="status" id="status" hidden></div>
 </header>
 <main>
   <div id="article-title" class="article-title"></div>
   <ol id="sentences" class="sentences"></ol>
-  <div id="empty" class="empty">Open a Dutch article in the current tab, then press <b>Load article</b>.</div>
+  <div id="empty" class="empty">Open a Dutch article in this tab and it will appear here.</div>
 </main>
 <div id="tooltip" class="tooltip" hidden></div>
 <script src="lib/splitter.js"></script>

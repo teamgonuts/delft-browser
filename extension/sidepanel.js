@@ -14,22 +14,35 @@ function setStatus(text, bad = false) { const el = $("status"); el.textContent =
 // ---------- article loading ----------
 function newItem(text) { return { text, native: {}, mine: null, flags: { listened: false, recorded: false, played: false }, reps: 0 }; }
 
-async function loadArticle() {
-  $("load").disabled = true;
-  setStatus("");
-  Glosses.translator(); // synchronously inside the click: a first-time model download needs a user gesture
-  try {
-    const data = await extractFromTab();
-    if (!data || !data.sentences || !data.sentences.length) throw new Error("No sentences found on this page.");
-    state.title = data.title; state.url = data.url;
+let loading = null, loadAgain = false;
+async function loadArticle(reason = "") {
+  if (loading) { loadAgain = true; return loading; } // a tab event during a load: run once more afterwards
+  loading = (async () => {
+    try {
+      console.log("[delft] load:", reason);
+      const { tab, data } = await extractFromTab();
+      console.log("[delft] extracted", data && data.sentences && data.sentences.length, "sentences from", data && data.url);
+      if (!data || !data.sentences || !data.sentences.length) throw new Error("No article text found on this page.");
+      if (data.url === state.url && state.sentences.length) {
+        // Same page. Re-render only if the text changed (page finished loading) and nothing has been practised yet.
+        const sameText = data.sentences.join("|") === state.sentences.map((x) => x.text).join("|");
+        const touched = state.sentences.some((x) => x.items.some((it) => it.mine || it.reps || it.flags.listened));
+        if (sameText || touched) return;
+      }
+      stopCurrent();
+      state.title = data.title; state.url = data.url; state.tabId = tab.id;
     state.sentences = data.sentences.map((text) => ({ text, phrases: Splitter.split(text), items: Splitter.split(text).map(newItem) }));
-    render();
-    preloadAudio();
-    prefetchGlosses();
-  } catch (e) {
-    $("empty").hidden = false;
-    $("empty").innerHTML = "Could not load: " + escapeHtml(e.message || String(e));
-  } finally { $("load").disabled = false; }
+      render();
+      preloadAudio();
+      prefetchGlosses();
+    } catch (e) {
+      state.url = ""; state.sentences = [];
+      $("article-title").textContent = ""; $("sentences").innerHTML = "";
+      $("empty").hidden = false;
+      $("empty").textContent = /No article|No web page/.test(e.message) ? "Open a Dutch article in this tab and it will appear here." : "Could not load: " + (e.message || String(e));
+    } finally { loading = null; if (loadAgain) { loadAgain = false; loadArticle("again"); } }
+  })();
+  return loading;
 }
 
 async function extractFromTab() {
@@ -37,10 +50,22 @@ async function extractFromTab() {
   const tabs = await chrome.tabs.query({});
   const candidates = tabs.filter((t) => /^https?:/.test(t.url || ""));
   if (!candidates.length) throw new Error("No web page tab found.");
-  let tab = candidates.find((t) => t.active && t.lastFocusedWindow) || candidates.find((t) => t.active);
+  const win = await chrome.windows.getLastFocused().catch(() => null);
+  let tab = candidates.find((t) => t.active && win && t.windowId === win.id) || candidates.find((t) => t.active);
   if (!tab) tab = candidates.sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0))[0];
   const results = await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["vendor/Readability.js", "content/extract.js"] });
-  return results && results[0] && results[0].result;
+  return { tab, data: results && results[0] && results[0].result };
+}
+
+// Follow the browser: load whatever article is in the active tab, and reload when the user switches tabs
+// or the page navigates. Extraction is cheap, so we just re-run it and skip if the URL is unchanged.
+function followTabs() {
+  if (!inExtension) return;
+  let timer = null;
+  const schedule = (why) => { console.log("[delft] tab event:", why); clearTimeout(timer); timer = setTimeout(() => loadArticle("tab:" + why), 400); };
+  chrome.tabs.onActivated.addListener(() => schedule("activated"));
+  chrome.tabs.onUpdated.addListener((tabId, info, tab) => { if (tab.active && info.status === "complete") schedule("updated"); });
+  chrome.windows.onFocusChanged.addListener((id) => { if (id !== chrome.windows.WINDOW_ID_NONE) schedule("focus"); });
 }
 
 // ---------- glosses ----------
@@ -234,20 +259,26 @@ document.addEventListener("mouseover", async (ev) => {
   if (seq !== tipSeq) return;
   show(g || (Glosses.status === "downloading" ? "downloading translator…" : "(no gloss)"), !g);
 });
-document.addEventListener("mousemove", (ev) => { if (!tip.hidden) positionTip(ev); });
 document.addEventListener("mouseout", (ev) => { if (ev.target.closest && ev.target.closest(".w")) { tip.hidden = true; tipSeq++; } });
 function positionTip(ev) {
-  const pad = 12; let x = ev.clientX + pad, y = ev.clientY + pad;
+  const w = ev.target.closest && ev.target.closest(".w");
+  const a = w ? w.getBoundingClientRect() : { left: ev.clientX, right: ev.clientX, top: ev.clientY, bottom: ev.clientY };
   const r = tip.getBoundingClientRect();
-  if (x + r.width > innerWidth - 8) x = ev.clientX - r.width - pad;
-  if (y + r.height > innerHeight - 8) y = ev.clientY - r.height - pad;
+  const margin = 8;
+  let x = a.left, y = a.bottom + 6;
+  if (x + r.width > innerWidth - margin) x = innerWidth - margin - r.width;
+  if (x < margin) x = margin;
+  if (y + r.height > innerHeight - margin) y = a.top - r.height - 6;
+  if (y < margin) y = margin;
   tip.style.left = x + "px"; tip.style.top = y + "px";
 }
 
 function escapeHtml(s) { return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
 
 // ---------- boot ----------
-$("load").addEventListener("click", loadArticle);
+$("reload").addEventListener("click", () => { state.url = ""; loadArticle("manual"); });
+followTabs();
+loadArticle("open");
 // Any click in the panel is a user gesture: retry a pending translator download.
 document.addEventListener("click", () => { if (!["ready", "missing", "downloading"].includes(Glosses.status)) Glosses.translator(); }, true);
 Glosses.onStatus((st, progress) => {

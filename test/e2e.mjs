@@ -86,12 +86,11 @@ try {
   log("extension id", extId);
   const panel = await browser.newPage();
   await panel.setViewport({ width: 420, height: 900 });
-  panel.on("console", (m) => { if (m.type() === "error" || m.type() === "warning") log("panel console:", m.text()); });
+  panel.on("console", (m) => { if (m.type() === "error" || m.type() === "warning" || m.text().startsWith("[delft]")) log("panel console:", m.text()); });
   await panel.goto(`chrome-extension://${extId}/sidepanel.html`, { waitUntil: "load" });
   await sleep(500);
 
-  // ---- 3. extract article, split into phrases (synchronous, rule-based) ----
-  await panel.click("#load");
+  // ---- 3. the panel loads the current tab's article by itself, split into phrases (synchronous, rule-based) ----
   await panel.waitForFunction(() => document.querySelectorAll(".card").length > 0 || (!document.getElementById("empty").hidden && /Could not/.test(document.getElementById("empty").textContent)), { timeout: 30000 });
   const sentences = await panel.evaluate(() => window.__delft.sentences.map((s) => s.text));
   if (!sentences.length) throw new Error("extraction failed: " + (await panel.$eval("#empty", (e) => e.textContent)));
@@ -160,6 +159,15 @@ try {
   await panel.evaluate(() => document.querySelector('.card[data-i="2"][data-j="0"]').scrollIntoView());
   await panel.screenshot({ path: path.join(OUT, "panel-phrases.png") });
   await panel.screenshot({ path: path.join(OUT, "panel-full.png"), fullPage: true });
+
+  // ---- 8. follow navigation: the article tab moves to another site, the panel should reload by itself ----
+  const NEXT = "https://nos.nl/artikel/2630855-regenbogen-en-oranje-luchten-waarom-het-weer-nu-zo-kleurrijk-is";
+  await page.bringToFront();
+  await page.goto(NEXT, { waitUntil: "domcontentloaded", timeout: 60000 }).catch(() => {});
+  // The panel tab is now in the background: poll on an interval, rAF-based polling never fires there.
+  await panel.waitForFunction(() => window.__delft.url.startsWith("https://nos.nl/artikel/2630855") && window.__delft.sentences.length >= 31, { timeout: 45000, polling: 500 });
+  report.steps.followedTitle = await panel.$eval("#article-title", (e) => e.textContent);
+  log("panel followed navigation to:", report.steps.followedTitle);
 
   report.ok = true;
 } catch (e) {
