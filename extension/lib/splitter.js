@@ -1,7 +1,7 @@
 // Deterministic Delft-style phrase splitter for Dutch sentences.
 // Rules (approved in Milestone 1):
 //   * a sentence of WHOLE_MAX words or fewer stays whole (and so does a longer one with no cut point below)
-//   * longer sentences split at commas first (comma stays at the end of the piece, also before a closing quote)
+//   * longer sentences split at commas, colons and semicolons first (the mark stays at the end of the piece)
 //   * a piece longer than CLAUSE_MAX words splits before a subordinating word: dat, die, zodra, omdat, terwijl, ...
 //   * a piece still longer than PIECE_MAX words splits before a preposition or at a noun-phrase boundary
 //     (noun followed by de/het/een), preferring a cut just after a past participle ("... gesloten | met ...")
@@ -27,7 +27,7 @@ const Splitter = (() => {
   // Split at commas, keeping the comma with the preceding piece. Commas inside quotes still count:
   // the Delft lines break there too.
   function splitCommas(s) {
-    const parts = s.split(/(?<=,[’”"']?)\s+/);
+    const parts = s.split(/(?<=[,:;][’”"']?)\s+/); // commas, colons and semicolons all end a piece
     return parts.map((p) => p.trim()).filter(Boolean);
   }
 

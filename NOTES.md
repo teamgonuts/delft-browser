@@ -15,6 +15,7 @@ Open it in Obsidian (vault `wiki-brain`) or read the files directly. Paths below
 - [Milestone 1 results — what worked, what didn't](../wiki-brain/wiki/projects/delft-browser/m1-results.md)
 - [Milestone 2 plan — install and it just works](../wiki-brain/wiki/projects/delft-browser/m2-plan.md)
 - [M2 spike — Chrome Translator API vs Claude glosses](../wiki-brain/wiki/projects/delft-browser/m2-spike-translator.md)
+- [Milestone 2 results — install and it just works](../wiki-brain/wiki/projects/delft-browser/m2-results.md)
 
 ## In this repo
 
