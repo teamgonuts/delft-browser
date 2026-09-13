@@ -17,6 +17,7 @@ function newItem(text) { return { text, native: {}, mine: null, flags: { listene
 async function loadArticle() {
   $("load").disabled = true;
   setStatus("");
+  Glosses.translator(); // synchronously inside the click: a first-time model download needs a user gesture
   try {
     const data = await extractFromTab();
     if (!data || !data.sentences || !data.sentences.length) throw new Error("No sentences found on this page.");
@@ -46,7 +47,7 @@ async function extractFromTab() {
 const tokenize = (text) => text.split(/(\s+)/).filter((t) => t.length).map((t) => ({ raw: t, key: Glosses.normKey(t), isWord: /[\p{L}\p{N}]/u.test(t) }));
 
 async function prefetchGlosses() {
-  // Warm the Translator (triggers the one-time model download) and the cache, a few words at a time.
+  // Warm the gloss cache in reading order. Dictionary words are free; the rest go through the translator.
   await Glosses.translator();
   for (const s of state.sentences) {
     for (const it of s.items) for (const t of tokenize(it.text)) if (t.isWord) { try { await Glosses.wordGloss(t.raw, s.text); } catch (e) { /* ignore */ } }
@@ -231,7 +232,7 @@ document.addEventListener("mouseover", async (ev) => {
   let g = null;
   try { g = await Glosses.wordGloss(w.textContent, s.text); } catch (e) { /* ignore */ }
   if (seq !== tipSeq) return;
-  show(g || (Glosses.status === "unavailable" ? "(translation not available in this Chrome)" : Glosses.status === "downloading" ? "downloading translator…" : "(no gloss)"), !g);
+  show(g || (Glosses.status === "downloading" ? "downloading translator…" : "(no gloss)"), !g);
 });
 document.addEventListener("mousemove", (ev) => { if (!tip.hidden) positionTip(ev); });
 document.addEventListener("mouseout", (ev) => { if (ev.target.closest && ev.target.closest(".w")) { tip.hidden = true; tipSeq++; } });
@@ -247,5 +248,13 @@ function escapeHtml(s) { return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&a
 
 // ---------- boot ----------
 $("load").addEventListener("click", loadArticle);
+// Any click in the panel is a user gesture: retry a pending translator download.
+document.addEventListener("click", () => { if (!["ready", "missing", "downloading"].includes(Glosses.status)) Glosses.translator(); }, true);
+Glosses.onStatus((st, progress) => {
+  if (st === "downloading") setStatus(`downloading Dutch-English translator… ${Math.round(progress * 100)}%`);
+  else if (st === "needs-gesture") setStatus("click anywhere to download the Dutch-English translator (one time)", true);
+  else if (st === "missing" || st === "failed") setStatus("on-device translator unavailable, using online translation");
+  else setStatus("");
+});
 setStatus("");
 window.__delft = state;
