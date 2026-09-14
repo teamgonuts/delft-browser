@@ -12,7 +12,8 @@ const state = { title: "", url: "", sentences: [], stream: null, recorder: null,
 function setStatus(text, bad = false) { const el = $("status"); el.textContent = text; el.className = "status " + (bad ? "bad" : "ok"); el.hidden = !text; }
 
 // ---------- article loading ----------
-function newItem(text) { return { text, native: {}, mine: null, flags: { listened: false, recorded: false, played: false }, reps: 0 }; }
+// counts: how often each of the three steps was done, in any order. Rounds (dots) = the smallest of the three.
+function newItem(text) { return { text, native: {}, mine: null, counts: { listened: 0, recorded: 0, played: 0 }, reps: 0 }; }
 
 let loading = null, loadAgain = false;
 async function loadArticle(reason = "") {
@@ -26,7 +27,7 @@ async function loadArticle(reason = "") {
       if (data.url === state.url && state.sentences.length) {
         // Same page. Re-render only if the text changed (page finished loading) and nothing has been practised yet.
         const sameText = data.sentences.join("|") === state.sentences.map((x) => x.text).join("|");
-        const touched = state.sentences.some((x) => x.items.some((it) => it.mine || it.reps || it.flags.listened));
+        const touched = state.sentences.some((x) => x.items.some((it) => it.mine || it.reps || it.counts.listened));
         if (sameText || touched) return;
       }
       stopCurrent();
@@ -122,13 +123,12 @@ function updateRow(i, j, activate = true) {
   }
 }
 
-function completeStep(i, j, flag) {
+// A step counts as soon as it starts (listening to half a clip and then pressing Record is still a listen),
+// and the steps can be done in any order: three listens, one recording and two playbacks is one round.
+function completeStep(i, j, step) {
   const it = state.sentences[i].items[j];
-  it.flags[flag] = true;
-  if (it.flags.listened && it.flags.recorded && it.flags.played) {
-    it.reps = Math.min(REPS_TARGET, it.reps + 1);
-    it.flags = { listened: false, recorded: false, played: false };
-  }
+  it.counts[step]++;
+  it.reps = Math.min(REPS_TARGET, it.counts.listened, it.counts.recorded, it.counts.played);
   updateRow(i, j);
 }
 
@@ -193,8 +193,8 @@ $("speed").addEventListener("change", () => { if (state.sentences.length) preloa
 async function playNative(i, j) {
   const it = state.sentences[i].items[j]; const voice = currentVoice();
   const btn = rowEl(i, j).querySelector(".native");
-  stopCurrent(); btn.classList.add("playing"); updateRow(i, j);
-  const finish = () => { btn.classList.remove("playing"); completeStep(i, j, "listened"); };
+  stopCurrent(); btn.classList.add("playing"); completeStep(i, j, "listened");
+  const finish = () => btn.classList.remove("playing");
   try {
     if (!it.native[voice.key]) btn.classList.add("loading");
     const url = await getNative(it, voice);
@@ -255,9 +255,9 @@ async function toggleRecord(i, j) {
 async function playMine(i, j) {
   const it = state.sentences[i].items[j]; if (!it.mine) return;
   const btn = rowEl(i, j).querySelector(".mine");
-  stopCurrent(); btn.classList.add("playing"); updateRow(i, j);
+  stopCurrent(); btn.classList.add("playing"); completeStep(i, j, "played");
   const a = new Audio(it.mine); currentAudio = a;
-  a.onended = () => { btn.classList.remove("playing"); completeStep(i, j, "played"); };
+  a.onended = () => btn.classList.remove("playing");
   await a.play();
 }
 
