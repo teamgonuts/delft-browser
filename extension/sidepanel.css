@@ -29,8 +29,10 @@ main { padding: 10px 12px 40px; }
 .card.active { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
 .num { color: var(--muted); font-size: 11px; }
 .text { font-size: 15px; line-height: 1.5; margin: 0 0 8px; }
-.w { border-bottom: 1px dotted #b8b6ad; cursor: help; border-radius: 2px; }
+.w { border-bottom: 1px dotted #b8b6ad; cursor: pointer; border-radius: 2px; }
 .w:hover { background: var(--accent-soft); }
+.w.playing { background: var(--accent-soft); border-bottom: 1px solid var(--accent); }
+.w.loading { opacity: .6; }
 .translation { color: var(--muted); font-size: 12px; font-style: italic; margin: -4px 0 8px; }
 .controls { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .controls button { padding: 5px 9px; font-size: 13px; }

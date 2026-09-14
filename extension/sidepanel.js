@@ -2,7 +2,7 @@
 //   article  -> content script (Readability) via chrome.scripting
 //   phrases  -> lib/splitter.js (rules)
 //   voice    -> lib/edgetts.js (Microsoft Edge neural voices), fallback chrome.tts
-//   glosses  -> lib/dictionary.js then Chrome's on-device Translator API (lib/glosses.js)
+//   glosses  -> lib/dictionary.js then Chrome's on-device Translator API (lib/glosses.js); click a word to hear it
 const REPS_TARGET = 3;
 const $ = (id) => document.getElementById(id);
 const inExtension = typeof chrome !== "undefined" && !!(chrome.scripting && chrome.tabs);
@@ -137,7 +137,7 @@ let currentAudio = null;
 function stopCurrent() {
   if (currentAudio) { currentAudio.pause(); currentAudio = null; }
   if (inExtension && chrome.tts) chrome.tts.stop();
-  document.querySelectorAll(".playing").forEach((b) => b.classList.remove("playing"));
+  document.querySelectorAll(".playing").forEach((b) => b.classList.remove("playing", "loading"));
 }
 
 // Clip for one item: memory -> IndexedDB -> Edge TTS. One in-flight promise per item+voice, so a click on an
@@ -170,6 +170,15 @@ async function preloadAudio() {
     }
   };
   await Promise.all([worker(), worker()]);
+  // Then every distinct word, so a click on a word is instant too. Phrases first: they are what the practice needs.
+  const words = [...new Set(state.sentences.flatMap((s) => s.items.flatMap((it) => tokenize(it.text).filter((t) => t.isWord).map((t) => speakable(t.raw)))))].filter(Boolean);
+  const wordWorker = async () => {
+    while (words.length && gen === preloadGen) {
+      const word = words.shift();
+      try { await getWordClip(word, voice); } catch (e) { console.warn("word preload failed", word, e); }
+    }
+  };
+  await Promise.all([wordWorker(), wordWorker()]);
 }
 $("voice").addEventListener("change", () => { if (state.sentences.length) preloadAudio(); });
 
@@ -243,6 +252,51 @@ async function playMine(i, j) {
   a.onended = () => { btn.classList.remove("playing"); completeStep(i, j, "played"); };
   await a.play();
 }
+
+// ---------- word pronunciation ----------
+// Click a word to hear just that word, in the selected voice. Same cache as the phrases (memory -> IndexedDB
+// -> Edge TTS), so a word costs one request the first time and is instant afterwards.
+const wordClips = new Map();
+const speakable = (raw) => raw.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "");
+async function getWordClip(word, voice) {
+  const k = voice + "|" + word;
+  if (wordClips.has(k)) return wordClips.get(k);
+  const p = (async () => {
+    let blob = await AudioCache.get(voice, word);
+    if (!blob) { blob = await EdgeTTS.synthesize(word, voice); AudioCache.put(voice, word, blob); }
+    return URL.createObjectURL(blob);
+  })();
+  wordClips.set(k, p);
+  p.catch(() => wordClips.delete(k));
+  return p;
+}
+async function playWord(w) {
+  const word = speakable(w.textContent); if (!word) return;
+  const voice = $("voice").value;
+  stopCurrent();
+  document.querySelectorAll(".w.playing").forEach((x) => x.classList.remove("playing"));
+  w.classList.add("playing", "loading");
+  const finish = () => w.classList.remove("playing", "loading");
+  try {
+    const url = await getWordClip(word, voice);
+    w.classList.remove("loading");
+    if (!w.classList.contains("playing")) return; // another word was clicked meanwhile
+    const a = new Audio(url); currentAudio = a;
+    a.onended = finish; a.onerror = finish;
+    await a.play();
+    return;
+  } catch (e) {
+    console.warn("Edge voice failed for word, using Chrome's built-in voice", e);
+    w.classList.remove("loading");
+  }
+  if (inExtension && chrome.tts) {
+    chrome.tts.speak(word, { lang: "nl-NL", onEvent: (ev) => { if (ev.type === "end" || ev.type === "error" || ev.type === "interrupted") finish(); } });
+  } else {
+    const u = new SpeechSynthesisUtterance(word); u.lang = "nl-NL"; u.onend = finish; u.onerror = finish;
+    speechSynthesis.cancel(); speechSynthesis.speak(u);
+  }
+}
+document.addEventListener("click", (ev) => { const w = ev.target.closest && ev.target.closest(".w"); if (w) playWord(w); });
 
 // ---------- tooltip ----------
 const tip = $("tooltip");
