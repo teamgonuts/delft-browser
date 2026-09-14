@@ -140,18 +140,25 @@ function stopCurrent() {
   document.querySelectorAll(".playing").forEach((b) => b.classList.remove("playing", "loading"));
 }
 
+// Voice + speed. The speed dropdown is a CEFR level: B2 is the voice as-is, each step 10% slower or faster.
+// Clips are cached under "voice@rate", except native speed which keeps the plain voice key (existing cache stays valid).
+function currentVoice() {
+  const voice = $("voice").value, rate = $("speed").value;
+  return { voice, rate, key: rate === "+0%" ? voice : voice + "@" + rate, chromeRate: 1 + parseInt(rate, 10) / 100 };
+}
+
 // Clip for one item: memory -> IndexedDB -> Edge TTS. One in-flight promise per item+voice, so a click on an
 // item that the preloader is already fetching just waits for that same request.
 const inflight = new Map();
-function getNative(it, voice) {
-  if (it.native[voice]) return Promise.resolve(it.native[voice]);
-  const k = voice + "|" + it.text;
+function getNative(it, v) {
+  if (it.native[v.key]) return Promise.resolve(it.native[v.key]);
+  const k = v.key + "|" + it.text;
   if (inflight.has(k)) return inflight.get(k);
   const p = (async () => {
-    let blob = await AudioCache.get(voice, it.text);
-    if (!blob) { blob = await EdgeTTS.synthesize(it.text, voice); AudioCache.put(voice, it.text, blob); }
-    it.native[voice] = URL.createObjectURL(blob);
-    return it.native[voice];
+    let blob = await AudioCache.get(v.key, it.text);
+    if (!blob) { blob = await EdgeTTS.synthesize(it.text, v.voice, { rate: v.rate }); AudioCache.put(v.key, it.text, blob); }
+    it.native[v.key] = URL.createObjectURL(blob);
+    return it.native[v.key];
   })();
   inflight.set(k, p);
   p.finally(() => inflight.delete(k));
@@ -161,7 +168,7 @@ function getNative(it, voice) {
 // Preload every phrase in reading order as soon as the article is loaded, two connections at a time.
 let preloadGen = 0;
 async function preloadAudio() {
-  const gen = ++preloadGen; const voice = $("voice").value;
+  const gen = ++preloadGen; const voice = currentVoice();
   const queue = state.sentences.flatMap((s) => s.items);
   const worker = async () => {
     while (queue.length && gen === preloadGen) {
@@ -181,14 +188,15 @@ async function preloadAudio() {
   await Promise.all([wordWorker(), wordWorker()]);
 }
 $("voice").addEventListener("change", () => { if (state.sentences.length) preloadAudio(); });
+$("speed").addEventListener("change", () => { if (state.sentences.length) preloadAudio(); });
 
 async function playNative(i, j) {
-  const it = state.sentences[i].items[j]; const voice = $("voice").value;
+  const it = state.sentences[i].items[j]; const voice = currentVoice();
   const btn = rowEl(i, j).querySelector(".native");
   stopCurrent(); btn.classList.add("playing"); updateRow(i, j);
   const finish = () => { btn.classList.remove("playing"); completeStep(i, j, "listened"); };
   try {
-    if (!it.native[voice]) btn.classList.add("loading");
+    if (!it.native[voice.key]) btn.classList.add("loading");
     const url = await getNative(it, voice);
     btn.classList.remove("loading");
     const a = new Audio(url); currentAudio = a;
@@ -204,9 +212,9 @@ async function playNative(i, j) {
   state.voiceMode = "chrome";
   setStatus("online voice unavailable, using this computer's Dutch voice", true);
   if (inExtension && chrome.tts) {
-    chrome.tts.speak(it.text, { lang: "nl-NL", onEvent: (ev) => { if (ev.type === "end") finish(); if (ev.type === "error") btn.classList.remove("playing"); } });
+    chrome.tts.speak(it.text, { lang: "nl-NL", rate: voice.chromeRate, onEvent: (ev) => { if (ev.type === "end") finish(); if (ev.type === "error") btn.classList.remove("playing"); } });
   } else {
-    const u = new SpeechSynthesisUtterance(it.text); u.lang = "nl-NL"; u.onend = finish;
+    const u = new SpeechSynthesisUtterance(it.text); u.lang = "nl-NL"; u.rate = voice.chromeRate; u.onend = finish;
     speechSynthesis.cancel(); speechSynthesis.speak(u);
   }
 }
@@ -258,12 +266,12 @@ async function playMine(i, j) {
 // -> Edge TTS), so a word costs one request the first time and is instant afterwards.
 const wordClips = new Map();
 const speakable = (raw) => raw.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "");
-async function getWordClip(word, voice) {
-  const k = voice + "|" + word;
+async function getWordClip(word, v) {
+  const k = v.key + "|" + word;
   if (wordClips.has(k)) return wordClips.get(k);
   const p = (async () => {
-    let blob = await AudioCache.get(voice, word);
-    if (!blob) { blob = await EdgeTTS.synthesize(word, voice); AudioCache.put(voice, word, blob); }
+    let blob = await AudioCache.get(v.key, word);
+    if (!blob) { blob = await EdgeTTS.synthesize(word, v.voice, { rate: v.rate }); AudioCache.put(v.key, word, blob); }
     return URL.createObjectURL(blob);
   })();
   wordClips.set(k, p);
@@ -272,7 +280,7 @@ async function getWordClip(word, voice) {
 }
 async function playWord(w) {
   const word = speakable(w.textContent); if (!word) return;
-  const voice = $("voice").value;
+  const voice = currentVoice();
   stopCurrent();
   document.querySelectorAll(".w.playing").forEach((x) => x.classList.remove("playing"));
   w.classList.add("playing", "loading");
@@ -290,9 +298,9 @@ async function playWord(w) {
     w.classList.remove("loading");
   }
   if (inExtension && chrome.tts) {
-    chrome.tts.speak(word, { lang: "nl-NL", onEvent: (ev) => { if (ev.type === "end" || ev.type === "error" || ev.type === "interrupted") finish(); } });
+    chrome.tts.speak(word, { lang: "nl-NL", rate: voice.chromeRate, onEvent: (ev) => { if (ev.type === "end" || ev.type === "error" || ev.type === "interrupted") finish(); } });
   } else {
-    const u = new SpeechSynthesisUtterance(word); u.lang = "nl-NL"; u.onend = finish; u.onerror = finish;
+    const u = new SpeechSynthesisUtterance(word); u.lang = "nl-NL"; u.rate = voice.chromeRate; u.onend = finish; u.onerror = finish;
     speechSynthesis.cancel(); speechSynthesis.speak(u);
   }
 }

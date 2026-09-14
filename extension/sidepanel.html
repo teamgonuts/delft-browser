@@ -17,6 +17,16 @@
         <option value="nl-BE-DenaNeural">Dena (BE, f)</option>
       </select>
     </label>
+    <label class="voice">Speed
+      <select id="speed" title="Playback speed as a CEFR level: B2 is the native voice as-is, each step is 10% slower or faster">
+        <option value="-30%">A1</option>
+        <option value="-20%">A2</option>
+        <option value="-10%">B1</option>
+        <option value="+0%" selected>B2</option>
+        <option value="+10%">C1</option>
+        <option value="+20%">C2</option>
+      </select>
+    </label>
     <button id="reload" title="Reload the article from the current tab">↻</button>
   </div>
   <div class="status" id="status" hidden></div>

@@ -14,7 +14,7 @@
 2. **● Record** records you saying it
 3. **▶ Me** plays your take back so you can compare
 
-Three full rounds fill the dots. Hover any word for its English meaning, click it to hear it on its own.
+Three full rounds fill the dots. Hover any word for its English meaning, click it to hear it on its own. The **Speed** picker is a CEFR level: B2 is the voice at its natural pace, A1 is 30% slower, C2 is 20% faster.
 
 No account. No API keys. No server. Everything runs inside Chrome.
 
